@@ -1,0 +1,71 @@
+# ========================
+# GÉNÉRAL & OS
+# ========================
+.DS_Store
+Thumbs.db
+*.log
+tmp/
+temp/
+
+# ========================
+# IDE (IntelliJ, VS Code, Eclipse)
+# ========================
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+.classpath
+.project
+.settings/
+bin/
+
+# ========================
+# FRONTEND (React / Node)
+# ========================
+# Les dépendances (TRÈS IMPORTANT : ne jamais commiter ça)
+node_modules/
+
+# Dossiers de build/production
+build/
+dist/
+
+# Fichiers d'environnement (contient souvent des clés API secrètes)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs npm/yarn
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ========================
+# BACKEND (Java / Spring Boot / Maven)
+# ========================
+# Dossier de compilation Maven (contient les .class et le .jar final)
+target/
+
+# Si tu utilises Gradle au lieu de Maven
+.gradle/
+build/
+
+# Fichiers compilés et archives
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Logs Spring Boot
+logs/
+
+# Secrets (Si tu as un fichier properties local avec tes mots de passe DB)
+# application-local.properties
+# application-secret.properties
+
+# Wrapper Maven (Optionnel : généralement on LE GARDE, mais si tu veux l'exclure :)
+# !.mvn/wrapper/maven-wrapper.jar
