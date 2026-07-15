@@ -14,5 +14,7 @@ public interface AffectationRepository extends JpaRepository<AffectationBC, Long
             "AND a.bc.id = :bcId")
     Double findTjmByConsultantAndBC(@Param("consultantId") Long consultantId,
                                     @Param("bcId") Long bcId);
+
+    java.util.List<AffectationBC> findByConsultantId(Long consultantId);
 }
 

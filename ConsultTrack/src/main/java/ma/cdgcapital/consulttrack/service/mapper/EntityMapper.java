@@ -55,7 +55,8 @@ public final class EntityMapper {
                 toRef(a.getConsultant()),
                 a.getDate(),
                 a.getStatut() != null ? a.getStatut().name() : null,
-                a.getMotif());
+                a.getMotif(),
+                a.getDemandeId());
     }
 
     public static TacheRealiseeDTO toDto(TacheRealisee t) {

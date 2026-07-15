@@ -7,7 +7,7 @@ import java.time.LocalDate;
 
 @Entity
 @Table(name = "rapport_activite", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"consultant_id", "bc_id", "mois", "annee"})
+        @UniqueConstraint(columnNames = {"consultant_id", "mois", "annee"})
 })
 @Data
 public class RapportActivite {
@@ -19,21 +19,14 @@ public class RapportActivite {
     @JoinColumn(name = "consultant_id")
     private Consultant consultant;
 
-    @ManyToOne
-    @JoinColumn(name = "bc_id")
-    private BonDeCommande bc;
-
     private Integer mois;
     private Integer annee;
 
-    @Column(length = 4000)
-    private String syntheseMois;
-
-    @Column(length = 4000)
-    private String faitsMarquants;
-
-    @Column(length = 4000)
-    private String perspectives;
+    /**
+     * Tâches réalisées du mois : lignes (puces) séparées par '\n'.
+     */
+    @Column(length = 8000)
+    private String tachesRealisees;
 
     @Enumerated(EnumType.STRING)
     private StatutPointage statut;
@@ -41,4 +34,11 @@ public class RapportActivite {
     private String motifRejet;
 
     private LocalDate dateModification;
+
+    /**
+     * Responsable ayant validé le rapport (null tant que non validé).
+     */
+    @ManyToOne
+    @JoinColumn(name = "valide_par_id")
+    private Consultant validePar;
 }

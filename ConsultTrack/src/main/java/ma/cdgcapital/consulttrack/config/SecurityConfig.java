@@ -39,8 +39,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Endpoints publics
                         .requestMatchers("/api/auth/**", "/api/public/**").permitAll()
-                        // Admin réservé
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // ⚠ ORDRE CRITIQUE : les règles spécifiques DOIVENT précéder /api/admin/**
+                        // Création d'utilisateurs : ADMIN uniquement (anti-escalade de privilèges)
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/admin/consultants").hasRole("ADMIN")
+                        // Gestion des jours fériés : ADMIN uniquement
+                        .requestMatchers("/api/admin/jours-feries/**").hasRole("ADMIN")
+                        // Le reste de l'admin (validation, référentiel) : ADMIN + RESPONSABLE
+                        .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "RESPONSABLE")
                         // Le reste authentifié
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

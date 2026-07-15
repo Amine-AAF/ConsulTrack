@@ -11,7 +11,7 @@ import java.util.Optional;
 @Repository
 public interface RapportActiviteRepository extends JpaRepository<RapportActivite, Long> {
 
-    Optional<RapportActivite> findByConsultantIdAndBcIdAndAnneeAndMois(Long consultantId, Long bcId, int annee, int mois);
+    Optional<RapportActivite> findByConsultantIdAndAnneeAndMois(Long consultantId, int annee, int mois);
 
     List<RapportActivite> findByStatut(StatutPointage statut);
 }

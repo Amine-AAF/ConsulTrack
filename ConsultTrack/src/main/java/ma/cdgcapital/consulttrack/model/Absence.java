@@ -25,4 +25,10 @@ public class Absence {
     private StatutPointage statut; // EN_ATTENTE, VALIDE, REJETE
 
     private String motif; // Ex: Congé annuel, Maladie
+
+    /**
+     * Identifiant de demande groupée : une demande multi-jours crée N lignes
+     * (une par jour ouvré) partageant le même demandeId → validation en un clic.
+     */
+    private String demandeId;
 }

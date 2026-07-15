@@ -25,12 +25,11 @@ public class RapportActiviteController {
     @GetMapping("/rapports/activite")
     public RapportActiviteDTO getRapport(
             @RequestParam Long consultantId,
-            @RequestParam Long bcId,
             @RequestParam int annee,
             @RequestParam int mois,
             Authentication auth) {
         accessGuard.assertOwnership(auth, consultantId);
-        return rapportActiviteService.getRapport(consultantId, bcId, annee, mois);
+        return rapportActiviteService.getRapport(consultantId, annee, mois);
     }
 
     @PostMapping("/rapports/activite")
@@ -39,20 +38,20 @@ public class RapportActiviteController {
         return rapportActiviteService.saveRapport(req);
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','RESPONSABLE')")
     @GetMapping("/admin/rapports/pending")
     public List<RapportActiviteDTO> getPending() {
         return rapportActiviteService.getPending();
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','RESPONSABLE')")
     @PutMapping("/admin/rapports/{id}/valider")
-    public ResponseEntity<Void> valider(@PathVariable Long id) {
-        rapportActiviteService.valider(id);
+    public ResponseEntity<Void> valider(@PathVariable Long id, Authentication auth) {
+        rapportActiviteService.valider(id, auth != null ? auth.getName() : null);
         return ResponseEntity.ok().build();
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','RESPONSABLE')")
     @PutMapping("/admin/rapports/{id}/rejeter")
     public ResponseEntity<Void> rejeter(@PathVariable Long id, @RequestParam String motif) {
         rapportActiviteService.rejeter(id, motif);

@@ -28,6 +28,7 @@ public class DashboardService {
     @Autowired private BonDeCommandeRepository bcRepository;
     @Autowired private AbsenceRepository absenceRepository;
     @Autowired private CabinetRepository cabinetRepository;
+    @Autowired private JourFerieRepository jourFerieRepository;
     @Autowired private PasswordEncoder passwordEncoder;
 
     // ==========================================
@@ -134,6 +135,18 @@ public class DashboardService {
         for (PointageRequest req : requests) {
             LocalDate date = LocalDate.parse(req.getDate());
 
+            // RÈGLE CLÉ : une absence VALIDÉE verrouille le jour — présence interdite (rejet explicite).
+            if ("BC".equalsIgnoreCase(req.getMode())
+                    && absenceRepository.existsByConsultantIdAndDateAndStatut(
+                            consultantId, date, StatutPointage.VALIDE)) {
+                throw new BusinessException("Jour " + date + " verrouillé : une absence validée "
+                        + "existe. Impossible d'y pointer une présence.");
+            }
+            // Jour férié global : non pointable en présence.
+            if ("BC".equalsIgnoreCase(req.getMode()) && jourFerieRepository.existsByDate(date)) {
+                throw new BusinessException("Jour " + date + " est férié : présence impossible.");
+            }
+
             TacheRealisee tache = tacheRepository
                     .findByConsultantIdAndDate(consultantId, date)
                     .orElse(new TacheRealisee());
@@ -237,6 +250,10 @@ public class DashboardService {
                         || a.getStatut() == StatutPointage.VALIDE)
                 .forEach(a -> couverts.add(a.getDate()));
 
+        // Jours fériés globaux : exemptés de saisie (couverts d'office).
+        jourFerieRepository.findByDateBetweenOrderByDate(ym.atDay(1), ym.atEndOfMonth())
+                .forEach(jf -> couverts.add(jf.getDate()));
+
         List<String> manquants = new ArrayList<>();
         for (LocalDate d = ym.atDay(1); !d.isAfter(ym.atEndOfMonth()); d = d.plusDays(1)) {
             DayOfWeek dow = d.getDayOfWeek();
@@ -291,12 +308,30 @@ public class DashboardService {
     public List<Consultant> getAllConsultants() { return consultantRepository.findAll(); }
 
     public Consultant saveConsultant(Consultant consultant) {
+        // Rôle par défaut : CONSULTANT (l'endpoint de création est réservé à l'ADMIN)
+        if (consultant.getRole() == null) {
+            consultant.setRole(Role.CONSULTANT);
+        }
+        // Un compte doit pouvoir se connecter : mot de passe requis à la création
+        if (consultant.getId() == null
+                && (consultant.getPassword() == null || consultant.getPassword().isBlank())) {
+            throw new BusinessException("Le mot de passe initial est obligatoire.");
+        }
         // Encoder le mot de passe si non BCrypt
         if (consultant.getPassword() != null && !consultant.getPassword().isBlank()
                 && !consultant.getPassword().startsWith("$2a$")
                 && !consultant.getPassword().startsWith("$2b$")
                 && !consultant.getPassword().startsWith("$2y$")) {
             consultant.setPassword(passwordEncoder.encode(consultant.getPassword()));
+        }
+        // Périmètre d'un RESPONSABLE : cabinets gérés (ids transmis par le JSON)
+        if (consultant.getCabinetsGeresIds() != null) {
+            java.util.Set<Cabinet> cabinets = new HashSet<>();
+            for (Long cid : consultant.getCabinetsGeresIds()) {
+                cabinets.add(cabinetRepository.findById(cid)
+                        .orElseThrow(() -> new BusinessException("Cabinet introuvable: " + cid)));
+            }
+            consultant.setCabinetsGeres(cabinets);
         }
         return consultantRepository.save(consultant);
     }
@@ -378,10 +413,17 @@ public class DashboardService {
     // 7. ABSENCES
     // ==========================================
 
+    /**
+     * Absences du mois : VALIDÉES (jours verrouillés) + EN_ATTENTE (signalées à la grille).
+     * Le frontend distingue par le champ statut du DTO.
+     */
     public List<Absence> getAbsencesMensuelles(Long consultantId, int annee, int mois) {
         java.time.YearMonth ym = java.time.YearMonth.of(annee, mois);
-        return absenceRepository.findByConsultantIdAndDateBetweenAndStatut(
-                consultantId, ym.atDay(1), ym.atEndOfMonth(), StatutPointage.VALIDE);
+        return absenceRepository.findByConsultantIdAndDateBetween(
+                        consultantId, ym.atDay(1), ym.atEndOfMonth()).stream()
+                .filter(a -> a.getStatut() == StatutPointage.VALIDE
+                        || a.getStatut() == StatutPointage.EN_ATTENTE)
+                .collect(Collectors.toList());
     }
 
     public List<Absence> getPendingAbsences() {
@@ -400,6 +442,11 @@ public class DashboardService {
                     .findByConsultantIdAndDate(abs.getConsultant().getId(), abs.getDate())
                     .orElse(new TacheRealisee());
 
+            // Intégrité compteur : si le jour portait une présence sur un BC,
+            // le BC doit être recrédité après l'écrasement par l'absence.
+            Long ancienBcId = (tache.getId() != null && tache.getBonDeCommande() != null)
+                    ? tache.getBonDeCommande().getId() : null;
+
             tache.setConsultant(abs.getConsultant());
             tache.setDate(abs.getDate());
             tache.setAnnee(abs.getDate().getYear());
@@ -413,18 +460,61 @@ public class DashboardService {
             tache.setTicketJira(null);
             tache.setMotifRejet(null);
             tacheRepository.save(tache);
+
+            if (ancienBcId != null) {
+                recalculerCompteursBC(ancienBcId);
+            }
         }
     }
 
+    /** Valide/rejette d'un coup toutes les lignes d'une demande groupée. */
+    @Transactional
+    public int updateAbsenceStatusByDemande(String demandeId, StatutPointage statut) {
+        List<Absence> lignes = absenceRepository.findByDemandeId(demandeId);
+        if (lignes.isEmpty()) throw new BusinessException("Demande introuvable: " + demandeId);
+        for (Absence a : lignes) {
+            updateAbsenceStatus(a.getId(), statut);
+        }
+        return lignes.size();
+    }
+
+    /**
+     * Demande d'absence multi-jours : crée une ligne par jour ouvré de la plage
+     * (week-ends et jours fériés exclus), toutes liées par un demandeId commun.
+     */
+    @Transactional
+    public List<Absence> demanderAbsence(Long consultantId, LocalDate dateDebut,
+                                         LocalDate dateFin, String motif) {
+        Consultant consultant = consultantRepository.findById(consultantId)
+                .orElseThrow(() -> new BusinessException("Consultant introuvable"));
+        if (dateDebut == null) throw new BusinessException("Date de début obligatoire");
+        LocalDate fin = (dateFin != null && !dateFin.isBefore(dateDebut)) ? dateFin : dateDebut;
+
+        String demandeId = java.util.UUID.randomUUID().toString();
+        List<Absence> creees = new ArrayList<>();
+        for (LocalDate d = dateDebut; !d.isAfter(fin); d = d.plusDays(1)) {
+            DayOfWeek dow = d.getDayOfWeek();
+            if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) continue;
+            if (jourFerieRepository.existsByDate(d)) continue;
+
+            Absence abs = new Absence();
+            abs.setConsultant(consultant);
+            abs.setDate(d);
+            abs.setMotif(motif);
+            abs.setStatut(StatutPointage.EN_ATTENTE);
+            abs.setDemandeId(demandeId);
+            creees.add(absenceRepository.save(abs));
+        }
+        if (creees.isEmpty()) {
+            throw new BusinessException("Aucun jour ouvré dans la plage demandée.");
+        }
+        return creees;
+    }
+
+    /** Compat : demande d'un seul jour. */
     @Transactional
     public Absence demanderAbsence(Long consultantId, LocalDate date, String motif) {
-        Absence abs = new Absence();
-        abs.setConsultant(consultantRepository.findById(consultantId)
-                .orElseThrow(() -> new BusinessException("Consultant introuvable")));
-        abs.setDate(date);
-        abs.setMotif(motif);
-        abs.setStatut(StatutPointage.EN_ATTENTE);
-        return absenceRepository.save(abs);
+        return demanderAbsence(consultantId, date, date, motif).get(0);
     }
 
     // ==========================================

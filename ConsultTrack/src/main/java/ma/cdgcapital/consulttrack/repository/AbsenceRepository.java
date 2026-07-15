@@ -22,4 +22,9 @@ public interface AbsenceRepository extends JpaRepository<Absence, Long> {
     List<Absence> findByConsultantIdAndDateBetweenAndStatut(Long consultantId,
                                                             LocalDate start, LocalDate end,
                                                             StatutPointage statut);
+
+    List<Absence> findByConsultantIdAndDateBetween(Long consultantId,
+                                                   LocalDate start, LocalDate end);
+
+    List<Absence> findByDemandeId(String demandeId);
 }

@@ -4,6 +4,10 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
 
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
 @Entity
 @Data
 public class Consultant {
@@ -27,4 +31,24 @@ public class Consultant {
     @ManyToOne
     @JoinColumn(name = "cabinet_id")
     private Cabinet cabinet;
+
+    /**
+     * Cabinets gérés par un RESPONSABLE (périmètre de validation / dashboard).
+     * Vide pour les autres rôles.
+     */
+    @JsonIgnore
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(name = "responsable_cabinet",
+            joinColumns = @JoinColumn(name = "responsable_id"),
+            inverseJoinColumns = @JoinColumn(name = "cabinet_id"))
+    private Set<Cabinet> cabinetsGeres = new HashSet<>();
+
+    /** Image de signature (data-URL base64) embarquée dans les PDF validés. */
+    @JsonIgnore
+    @Column(columnDefinition = "TEXT")
+    private String signatureImage;
+
+    /** Champ technique JSON (création admin) : ids des cabinets gérés. */
+    @Transient
+    private List<Long> cabinetsGeresIds;
 }

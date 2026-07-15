@@ -20,4 +20,5 @@ public class AbsenceDTO {
     private LocalDate date;
     private String statut;
     private String motif;
+    private String demandeId;
 }
