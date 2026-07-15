@@ -10,10 +10,10 @@ const PrivateRoute = ({ allowedRoles }) => {
         return <Navigate to="/login" replace />;
     }
 
-    // 2. Rôle non autorisé ? -> Redirection safe (ou page 403)
+    // 2. Rôle non autorisé ? -> retour au dashboard (route commune à tous les rôles,
+    //    évite toute boucle de redirection : /timesheet n'est pas accessible au RESPONSABLE)
     if (allowedRoles && !allowedRoles.includes(user.role)) {
-        // Si un consultant tente d'aller en admin, on le renvoie sur sa timesheet
-        return <Navigate to="/timesheet" replace />;
+        return <Navigate to="/" replace />;
     }
 
     // 3. Tout est bon -> Affiche la page demandée

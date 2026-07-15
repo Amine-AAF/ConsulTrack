@@ -1,652 +1,855 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../api/axiosConfig';
-import { generateTimesheetPDF } from '../utils/pdfGenerator';
 import {
-    CalendarCheck, ChevronLeft, ChevronRight, Save,
-    Users, Briefcase, Ticket, CalendarDays,
-    Lock, AlertTriangle, History as HistoryIcon,
-    CheckCircle2, Palmtree, Coffee, Printer, Plus, Search,
-    PieChart, Activity, FileDown
+    PageHeader, StatCard, Button, Card, BudgetGauge, COLORS,
+} from './ui';
+import {
+    CalendarCheck, ChevronLeft, ChevronRight, Save, Send, Lock,
+    AlertTriangle, CheckCircle2, XCircle, Users, Palmtree, Wand2,
+    CalendarRange, Wrench, Briefcase,
 } from 'lucide-react';
 
+/* ============================================================
+   Ma Présence (RPI) — saisie mensuelle de présence par BC.
+   Un jour ouvré = présence (peinte sur un BC), absence (via
+   demande), ou férié (géré par l'admin). Soumission mensuelle.
+   ============================================================ */
+
+const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+    'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+const JOURS_ENTETE = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+const MOTIFS_ABSENCE = ['Congé annuel', 'Maladie', 'Récupération', 'Sans solde'];
+
+const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const normDate = (d) => String(d).slice(0, 10);
+
+/** Jours ouvrés (lun-ven) du mois : [{ day, dateStr, dow }] */
+const weekdaysOfMonth = (annee, mois) => {
+    const res = [];
+    const nbJours = new Date(annee, mois, 0).getDate();
+    for (let d = 1; d <= nbJours; d++) {
+        const dow = new Date(annee, mois - 1, d).getDay();
+        if (dow !== 0 && dow !== 6) res.push({ day: d, dateStr: iso(annee, mois, d), dow });
+    }
+    return res;
+};
+
+/** Regroupe des dates ISO triées en plages contiguës (les week-ends ne coupent pas). */
+const contiguousRuns = (dateStrs) => {
+    const sorted = [...dateStrs].sort();
+    const runs = [];
+    sorted.forEach((ds) => {
+        const last = runs[runs.length - 1];
+        if (last) {
+            const next = new Date(`${last.fin}T00:00:00`);
+            do { next.setDate(next.getDate() + 1); } while ([0, 6].includes(next.getDay()));
+            if (iso(next.getFullYear(), next.getMonth() + 1, next.getDate()) === ds) { last.fin = ds; return; }
+        }
+        runs.push({ debut: ds, fin: ds });
+    });
+    return runs;
+};
+
 const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
-    // --- ETATS ---
-    const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
-    const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+    const isConsultant = userRole === 'CONSULTANT';
+    const today = new Date();
 
-    // Filtres Admin
+    // --- Navigation / sélection ---
+    const [annee, setAnnee] = useState(today.getFullYear());
+    const [mois, setMois] = useState(today.getMonth() + 1);
     const [consultants, setConsultants] = useState([]);
-    const [selectedConsultant, setSelectedConsultant] = useState(userRole === 'ADMIN' ? "" : userId);
+    const [consultantId, setConsultantId] = useState(isConsultant ? String(userId ?? '') : '');
 
-    const [availableBCs, setAvailableBCs] = useState([]);
+    // --- Données chargées (clé = date ISO "YYYY-MM-DD") ---
+    const [saisies, setSaisies] = useState({});     // TacheRealiseeDTO par jour
+    const [absences, setAbsences] = useState({});   // AbsenceDTO par jour
+    const [feries, setFeries] = useState({});       // libellé par jour
+    const [bcs, setBcs] = useState([]);
+    const [prevMonthOk, setPrevMonthOk] = useState(true);
 
-    // --- LOGIQUE MÉTIER ---
-    const [monthStatus, setMonthStatus] = useState('DRAFT');
-    const [isSequentialLocked, setIsSequentialLocked] = useState(false);
+    // --- Édition locale ---
+    // painted : jours de présence éditables (brouillons chargés, rejets corrigés, nouveaux clics)
+    const [painted, setPainted] = useState({});     // { dateStr: {bcId, duree, desc, type, jira, isNew} }
+    const [selectedBcId, setSelectedBcId] = useState('');
+    const [uiMode, setUiMode] = useState('PRESENCE'); // 'PRESENCE' | 'ABSENCE'
+    const [absSelection, setAbsSelection] = useState([]); // dates ISO sélectionnées pour demande
+    const [absMotif, setAbsMotif] = useState(MOTIFS_ABSENCE[0]);
 
-    // --- DONNÉES GRILLE ---
-    const [selections, setSelections] = useState({});
-    const [dayStatuses, setDayStatuses] = useState({});
-    const [initialMonthLoad, setInitialMonthLoad] = useState({});
-
-    // --- DONNÉES ACTIVITÉ (FORMULAIRE BAS) ---
-    const [selectedBCId, setSelectedBCId] = useState("");
-    const [weeksInMonth, setWeeksInMonth] = useState([]);
-    const [selectedWeekIndex, setSelectedWeekIndex] = useState(0);
-
-    // Mode de saisie grille
-    const [inputMode, setInputMode] = useState('BC');
-
-    const [taskType, setTaskType] = useState('PROJET');
-    const [jiraTicket, setJiraTicket] = useState('');
+    // --- Description appliquée aux nouveaux jours à l'enregistrement ---
     const [description, setDescription] = useState('');
-    const [dailyInput, setDailyInput] = useState({ 0: '', 1: '', 2: '', 3: '', 4: '' });
+    const [typePrestation, setTypePrestation] = useState('PROJET');
+    const [ticketJira, setTicketJira] = useState('');
 
-    const [loadingPresence, setLoadingPresence] = useState(false);
-    const [statusPresence, setStatusPresence] = useState(null);
-    const [yearHistory, setYearHistory] = useState([]);
+    // --- UI ---
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [toast, setToast] = useState(null);
+    const [missingDays, setMissingDays] = useState([]);
+    const [refreshKey, setRefreshKey] = useState(0);
 
-    const moisNom = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
-    const annees = Array.from({ length: 11 }, (_, i) => 2025 + i);
-
-    const formatDateForAPI = (year, month, day) => {
-        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const notify = (type, message) => {
+        setToast({ type, message });
+        setTimeout(() => setToast(null), 5000);
     };
 
-    // --- 1. CHARGEMENT LISTE CONSULTANTS (ADMIN) ---
+    // ============================== CHARGEMENT ==============================
+
     useEffect(() => {
-        if (userRole === 'ADMIN') {
-            api.get('/admin/consultants').then(res => setConsultants(res.data)).catch(console.error);
-        } else {
-            setSelectedConsultant(userId);
-        }
-    }, [userRole, userId]);
+        if (isConsultant) { setConsultantId(String(userId ?? '')); return; }
+        api.get('/admin/consultants')
+            .then((res) => setConsultants(res.data))
+            .catch(() => notify('error', 'Impossible de charger les consultants.'));
+    }, [isConsultant, userId]);
 
-    // --- 2. CHARGEMENT DES BC ---
-    const loadBCs = async (consultantIdToLoad) => {
-        if (!consultantIdToLoad) return [];
-        try {
-            const res = await api.get('/admin/bcs');
-            const targetId = parseInt(consultantIdToLoad);
-
-            const filtered = res.data.filter(bc =>
-                (bc.consultantId === targetId) ||
-                (bc.consultant?.id === targetId)
-            );
-
-            setAvailableBCs(filtered);
-
-            if (filtered.length > 0) {
-                setSelectedBCId(prev => {
-                    const exists = filtered.find(b => String(b.id) === String(prev));
-                    return exists ? String(exists.id) : String(filtered[0].id);
-                });
-            } else {
-                setSelectedBCId("");
-            }
-            return filtered;
-        } catch (err) {
-            console.error("Erreur chargement BC:", err);
-            setAvailableBCs([]);
-            return [];
-        }
-    };
-
-    // --- CHARGEMENT PRINCIPAL ---
     useEffect(() => {
-        setSelections({});
-        setDayStatuses({});
-        setInitialMonthLoad({});
-        setMonthStatus('DRAFT');
-        setIsSequentialLocked(false);
-        setAvailableBCs([]);
+        setSaisies({}); setAbsences({}); setFeries({}); setBcs([]);
+        setPainted({}); setAbsSelection([]); setMissingDays([]);
+        setPrevMonthOk(true);
+        if (!consultantId) return;
 
-        if (!selectedConsultant) return;
-
-        const loadData = async () => {
-            setLoadingPresence(true);
+        const load = async () => {
+            setLoading(true);
             try {
-                await loadBCs(selectedConsultant);
-
-                if (currentYear >= 2026 && !(currentYear === 2026 && currentMonth === 1)) {
-                    let prevM = currentMonth - 1, prevY = currentYear;
-                    if (prevM === 0) { prevM = 12; prevY -= 1; }
-                    try {
-                        const resPrev = await api.get(`/dashboard/timesheet/${selectedConsultant}?annee=${prevY}&mois=${prevM}`);
-                        // Cohérence avec backend (DashboardService.isMoisPrecedentValide) :
-                        // seul VALIDE débloque le mois suivant.
-                        if (!resPrev.data || resPrev.data.length === 0 || resPrev.data.some(t => t.statut !== 'VALIDE')) {
-                            setIsSequentialLocked(true);
-                        }
-                    } catch (e) { console.warn("Pas d'historique mois précédent"); }
-                }
-
-                const [resTaches, resAbs] = await Promise.all([
-                    api.get(`/dashboard/timesheet/${selectedConsultant}?annee=${currentYear}&mois=${currentMonth}`),
-                    api.get(`/dashboard/absences/${selectedConsultant}?annee=${currentYear}&mois=${currentMonth}`)
+                const [resTaches, resBcs, resAbs, resFeries, resStatus] = await Promise.all([
+                    api.get(`/dashboard/timesheet/${consultantId}?annee=${annee}&mois=${mois}`),
+                    api.get('/admin/bcs'),
+                    api.get(`/dashboard/absences/${consultantId}?annee=${annee}&mois=${mois}`),
+                    api.get(`/jours-feries?annee=${annee}`),
+                    api.get(`/timesheet/status?consultantId=${consultantId}&annee=${annee}&mois=${mois}`),
                 ]);
 
-                const initialMap = {};
-                const statusMap = {};
-                const initialLoadCounts = {};
-                let hasDraft = false, hasPending = false, allValidated = true, itemCount = 0;
-                let hasBC = false;
-
-                resTaches.data.forEach(p => {
-                    let dayNum;
-                    if (p.date && p.date.includes('T')) dayNum = parseInt(p.date.split('T')[0].split('-')[2], 10);
-                    else dayNum = new Date(p.date).getDate();
-
-                    itemCount++;
-                    if (p.statut === 'BROUILLON') hasDraft = true;
-                    if (p.statut === 'EN_ATTENTE') hasPending = true;
-                    if (p.statut !== 'VALIDE') allValidated = false;
-                    if (p.modeSaisie === 'BC' || p.mode === 'BC') hasBC = true;
-
-                    const bcId = p.bonDeCommande?.id || p.bcId;
-                    initialMap[dayNum] = {
-                        type: p.modeSaisie || 'BC', val: p.duree, bcId: bcId,
-                        desc: p.descriptionTache, jira: p.ticketJira, taskType: p.typePrestation,
-                        date: p.date.split('T')[0],
-                        bonDeCommande: p.bonDeCommande
-                    };
-                    statusMap[dayNum] = p.statut;
-
-                    if (p.modeSaisie === 'BC' || !p.modeSaisie) {
-                        if (!initialLoadCounts[bcId]) initialLoadCounts[bcId] = 0;
-                        initialLoadCounts[bcId] += p.duree;
+                const saisiesMap = {};
+                const paintedMap = {};
+                resTaches.data.forEach((t) => {
+                    const ds = normDate(t.date);
+                    saisiesMap[ds] = t;
+                    // Les brouillons restent directement éditables (repeints à l'écran)
+                    if (t.statut === 'BROUILLON') {
+                        paintedMap[ds] = {
+                            bcId: t.bonDeCommande?.id ?? t.bcId, duree: t.duree,
+                            desc: t.descriptionTache, type: t.typePrestation, jira: t.ticketJira,
+                            isNew: false,
+                        };
                     }
                 });
+                const absMap = {};
+                resAbs.data.forEach((a) => { absMap[normDate(a.date)] = a; });
+                const feriesMap = {};
+                resFeries.data.forEach((jf) => { feriesMap[normDate(jf.date)] = jf.libelle; });
 
-                resAbs.data.forEach(a => {
-                    let dayNum;
-                    if (a.date && a.date.includes('T')) dayNum = parseInt(a.date.split('T')[0].split('-')[2], 10);
-                    else dayNum = new Date(a.date).getDate();
+                const cid = parseInt(consultantId, 10);
+                const mesBcs = resBcs.data.filter(
+                    (bc) => bc.consultantId === cid || bc.consultant?.id === cid,
+                );
 
-                    initialMap[dayNum] = { type: 'ABS', val: 1.0, desc: a.motif, date: a.date.split('T')[0] };
-                    statusMap[dayNum] = a.statut;
+                setSaisies(saisiesMap);
+                setPainted(paintedMap);
+                setAbsences(absMap);
+                setFeries(feriesMap);
+                setBcs(mesBcs);
+                setSelectedBcId((prev) => {
+                    if (mesBcs.some((b) => String(b.id) === String(prev))) return prev;
+                    const dispo = mesBcs.find((b) => (b.joursMax || 0) - (b.joursConsommes || 0) - (b.joursEngages || 0) > 0);
+                    return String((dispo || mesBcs[0])?.id ?? '');
                 });
-
-                setSelections(initialMap);
-                setDayStatuses(statusMap);
-                setInitialMonthLoad(initialLoadCounts);
-
-                if (itemCount === 0) setMonthStatus('DRAFT');
-                else if (hasDraft) setMonthStatus('DRAFT');
-                else if (hasPending) setMonthStatus('EN_ATTENTE');
-                else if (allValidated) {
-                    if (hasBC) setMonthStatus('VALIDE');
-                    else setMonthStatus('DRAFT');
-                }
-                else setMonthStatus('DRAFT');
-
-                fetchFullYearHistory();
-
-            } catch (err) { console.error("Erreur chargement:", err); }
-            finally { setLoadingPresence(false); }
+                setPrevMonthOk(resStatus.data === true);
+            } catch (err) {
+                console.error('Erreur chargement RPI:', err);
+                notify('error', 'Erreur lors du chargement des données du mois.');
+            } finally {
+                setLoading(false);
+            }
         };
-        loadData();
-    }, [selectedConsultant, currentMonth, currentYear]);
+        load();
+    }, [consultantId, annee, mois, refreshKey]);
 
-    const fetchFullYearHistory = async () => {
-        if(!selectedConsultant) return;
-        const promises = Array.from({length: 12}, (_, i) => i + 1).map(m =>
-            api.get(`/dashboard/timesheet/${selectedConsultant}?annee=${currentYear}&mois=${m}`)
-                .then(res => ({ month: m, data: res.data })).catch(() => ({ month: m, data: [] }))
-        );
-        const results = await Promise.all(promises);
-        const history = [];
-        results.forEach(({ month, data }) => {
-            if (data && data.length > 0) {
-                const isValide = data.every(t => t.statut === 'VALIDE');
-                const hasBC = data.some(t => t.modeSaisie === 'BC' || t.mode === 'BC');
-                if (isValide && hasBC) {
-                    history.push({ month, year: currentYear, label: `${moisNom[month-1]} ${currentYear}`, status: 'VALIDE' });
-                }
-            }
+    // ============================== DÉRIVATIONS ==============================
+
+    const weekdays = useMemo(() => weekdaysOfMonth(annee, mois), [annee, mois]);
+
+    /** Semaines ouvrées du mois : tableau de tableaux de dateStr. */
+    const weeks = useMemo(() => {
+        const res = [];
+        let current = [];
+        weekdays.forEach((wd) => {
+            if (wd.dow === 1 && current.length) { res.push(current); current = []; }
+            current.push(wd.dateStr);
         });
-        setYearHistory(history);
-    };
+        if (current.length) res.push(current);
+        return res;
+    }, [weekdays]);
 
-    // --- CALCULS ---
-    const getDynamicBCStats = (bc) => {
-        const dbConsumed = bc.joursConsommes || 0;
-        const loadedForThisMonth = initialMonthLoad[bc.id] || 0;
-        const currentOnScreen = Object.values(selections)
-            .filter(sel => sel.type === 'BC' && String(sel.bcId) === String(bc.id))
-            .reduce((acc, curr) => acc + (curr.val || 0), 0);
-        const remaining = bc.joursMax - (dbConsumed - loadedForThisMonth + currentOnScreen);
-        return { remaining: remaining < 0 ? 0 : remaining, realRemaining: remaining, isOverBudget: remaining < 0 };
-    };
+    /** État d'un jour ouvré pour la grille et les règles de clic. */
+    const getDayState = useCallback((dateStr) => {
+        if (painted[dateStr]) return { kind: 'PAINTED', locked: false };
+        if (feries[dateStr]) return { kind: 'FERIE', locked: true };
+        const abs = absences[dateStr];
+        if (abs) {
+            return abs.statut === 'VALIDE'
+                ? { kind: 'ABS_VALIDE', locked: true }
+                : { kind: 'ABS_ATTENTE', locked: true };
+        }
+        const s = saisies[dateStr];
+        if (s) {
+            if (s.statut === 'VALIDE') return { kind: 'SAISIE_VALIDE', locked: true };
+            if (s.statut === 'EN_ATTENTE') return { kind: 'SAISIE_ATTENTE', locked: true };
+            if (s.statut === 'REJETE') return { kind: 'REJETE', locked: true }; // débloqué via « Corriger »
+        }
+        return { kind: 'LIBRE', locked: false };
+    }, [painted, feries, absences, saisies]);
 
-    const getMonthRecap = () => {
-        let totalWorked = 0, totalAbs = 0, totalFerie = 0;
-        const bcDetails = {};
-        Object.values(selections).forEach(sel => {
-            if (sel.type === 'BC') {
-                totalWorked += sel.val;
-                if (!bcDetails[sel.bcId]) bcDetails[sel.bcId] = 0;
-                bcDetails[sel.bcId] += sel.val;
-            } else if (sel.type === 'ABS' || sel.type === 'ABSENCE') totalAbs += sel.val;
-            else if (sel.type === 'FERIE') totalFerie += sel.val;
+    const rejectedDays = useMemo(
+        () => weekdays
+            .filter(({ dateStr }) => saisies[dateStr]?.statut === 'REJETE' && !painted[dateStr])
+            .map(({ dateStr }) => ({ dateStr, saisie: saisies[dateStr] })),
+        [weekdays, saisies, painted],
+    );
+
+    /** Étape de la timeline du mois, dérivée des saisies chargées. */
+    const monthStep = useMemo(() => {
+        const entries = Object.values(saisies);
+        if (entries.some((t) => t.statut === 'REJETE')) return 'REJETE';
+        if (entries.length && entries.every((t) => t.statut === 'VALIDE')) return 'VALIDE';
+        if (entries.some((t) => t.statut === 'EN_ATTENTE')) return 'SOUMIS';
+        return 'BROUILLON';
+    }, [saisies]);
+
+    /** Consommation à l'écran d'un BC (brouillons peints, non comptés côté serveur). */
+    const paintedByBc = useMemo(() => {
+        const map = {};
+        Object.values(painted).forEach((p) => {
+            map[p.bcId] = (map[p.bcId] || 0) + (p.duree || 0);
         });
-        return { totalWorked, totalAbs, totalFerie, bcDetails };
-    };
-    const recap = getMonthRecap();
+        return map;
+    }, [painted]);
 
-    // --- GESTION SEMAINES ---
-    useEffect(() => {
-        const getWeeks = (year, month) => {
-            const weeks = [];
-            let date = new Date(year, month - 1, 1);
-            const endMonth = new Date(year, month, 0);
-            while (date <= endMonth) {
-                const start = new Date(date);
-                let end = new Date(date);
-                while(end.getDay() !== 5 && end < endMonth) end.setDate(end.getDate() + 1);
-                weeks.push({ start: new Date(start), end: new Date(end), label: `SEMAINE ${weeks.length + 1}` });
-                date = new Date(end);
-                date.setDate(date.getDate() + (date.getDay() === 5 ? 3 : 1));
-            }
-            return weeks;
+    const bcConso = (bc) => (bc.joursConsommes || 0) + (bc.joursEngages || 0) + (paintedByBc[bc.id] || 0);
+    const bcRestant = (bc) => (bc.joursMax || 0) - bcConso(bc);
+    const bcRef = (bcId) => bcs.find((b) => String(b.id) === String(bcId))?.reference || 'BC ?';
+
+    const recap = useMemo(() => {
+        let joursTravailles = 0;
+        let totalJH = 0;
+        let nbAbsences = 0;
+        let nbFeries = 0;
+        weekdays.forEach(({ dateStr }) => {
+            if (feries[dateStr]) { nbFeries += 1; return; }
+            if (absences[dateStr]) { nbAbsences += 1; return; }
+            const duree = painted[dateStr]?.duree
+                ?? (['EN_ATTENTE', 'VALIDE'].includes(saisies[dateStr]?.statut) ? saisies[dateStr].duree : 0);
+            if (duree > 0) { joursTravailles += 1; totalJH += duree; }
+        });
+        return { joursTravailles, totalJH, nbAbsences, nbFeries };
+    }, [weekdays, feries, absences, painted, saisies]);
+
+    // ============================== ACTIONS ==============================
+
+    const paintDay = (dateStr, prev) => {
+        if (!selectedBcId) { notify('error', 'Sélectionnez d\'abord un bon de commande.'); return prev; }
+        const bc = bcs.find((b) => String(b.id) === String(selectedBcId));
+        const restant = bc ? bcRestant(bc) : 0;
+        if (restant < 0.5) { notify('error', `Budget épuisé pour le BC ${bc?.reference || ''}.`); return prev; }
+        return {
+            ...prev,
+            [dateStr]: { bcId: parseInt(selectedBcId, 10), duree: Math.min(1.0, restant), isNew: true },
         };
-        setWeeksInMonth(getWeeks(currentYear, currentMonth));
-        setSelectedWeekIndex(0);
-        setDailyInput({ 0: '', 1: '', 2: '', 3: '', 4: '' });
-    }, [currentYear, currentMonth]);
-
-    const getHistoryByWeek = () => {
-        const history = {};
-        weeksInMonth.forEach(week => {
-            history[week.label] = [];
-            let currentIterDate = new Date(week.start);
-            const endDate = new Date(week.end);
-            while (currentIterDate <= endDate) {
-                const dayNum = currentIterDate.getDate();
-                const sel = selections[dayNum];
-                if (sel && sel.type === 'BC') {
-                    const existingTask = history[week.label].find(t => t.desc === sel.desc && t.jira === sel.jira && t.type === sel.taskType);
-                    if (existingTask) { existingTask.duration += sel.val; }
-                    else {
-                        history[week.label].push({
-                            desc: sel.desc, jira: sel.jira, type: sel.taskType, duration: sel.val, bcId: sel.bcId
-                        });
-                    }
-                }
-                currentIterDate.setDate(currentIterDate.getDate() + 1);
-            }
-        });
-        return history;
     };
-    const historyData = getHistoryByWeek();
 
-    // --- TOGGLE GRILLE ---
-    const toggleDay = (dayNum) => {
-        const dateObj = new Date(currentYear, currentMonth - 1, dayNum);
-        if ([0,6].includes(dateObj.getDay())) return; // Ignore WE
+    const handleDayClick = (dateStr) => {
+        const state = getDayState(dateStr);
 
-        if (monthStatus === 'EN_ATTENTE' || monthStatus === 'VALIDE') return;
-        if (dayStatuses[dayNum] === 'VALIDE') { alert("Ce jour est déjà validé."); return; }
-        if (isSequentialLocked && userRole !== 'ADMIN') { alert("Veuillez valider le mois précédent d'abord."); return; }
+        if (uiMode === 'ABSENCE') {
+            if (state.kind !== 'LIBRE') return;
+            setAbsSelection((prev) => (prev.includes(dateStr)
+                ? prev.filter((d) => d !== dateStr)
+                : [...prev, dateStr]));
+            return;
+        }
 
-        setSelections(prev => {
-            const current = prev[dayNum];
-            if (current) {
-                // Si on reclique avec le même mode, on efface
-                const isSameMode =
-                    (inputMode === 'BC' && current.type === 'BC' && String(current.bcId) === String(selectedBCId)) ||
-                    (inputMode !== 'BC' && (current.type === inputMode || (inputMode === 'ABSENCE' && current.type === 'ABS')));
-                if (isSameMode) { const n = {...prev}; delete n[dayNum]; return n; }
-            }
-
-            const dateStr = formatDateForAPI(currentYear, currentMonth, dayNum);
-
-            // Cas Travaillé (BC)
-            if (inputMode === 'BC') {
-                let targetBCId = selectedBCId;
-                // Si pas de BC sélectionné, on tente de prendre le premier dispo
-                if (!targetBCId && availableBCs.length > 0) {
-                    targetBCId = String(availableBCs[0].id);
-                    setSelectedBCId(targetBCId);
-                }
-
-                if (!targetBCId) { alert("Veuillez sélectionner un BC dans la liste en bas."); return prev; }
-
-                const targetBC = availableBCs.find(b => String(b.id) === String(targetBCId));
-                if (targetBC) {
-                    const stats = getDynamicBCStats(targetBC);
-                    if (stats.realRemaining <= 0) { alert(`Budget épuisé pour ce BC.`); return prev; }
-                    // Si reste < 1 jour, on met 0.5 par défaut
-                    if (stats.realRemaining < 1.0) {
-                        return { ...prev, [dayNum]: { type: 'BC', val: 0.5, bcId: parseInt(targetBCId), desc: "Saisie Rapide", jira: "", taskType: "PROJET", date: dateStr }};
-                    }
-                }
-                return { ...prev, [dayNum]: { type: 'BC', val: 1.0, bcId: parseInt(targetBCId), desc: "Saisie Rapide", jira: "", taskType: "PROJET", date: dateStr }};
-            }
-            // Cas Absence
-            else if (inputMode === 'ABSENCE') {
-                return { ...prev, [dayNum]: { type: 'ABS', val: 1.0, desc: 'Congé', date: dateStr } };
-            }
-            // Cas Férié
-            else if (inputMode === 'FERIE') {
-                return { ...prev, [dayNum]: { type: 'FERIE', val: 1.0, desc: 'Férié', date: dateStr } };
-            }
-            return prev;
+        if (state.locked) return;
+        setPainted((prev) => {
+            const current = prev[dateStr];
+            if (!current) return paintDay(dateStr, prev);
+            // Cycle : 1.0 → 0.5 → retrait
+            if (current.duree > 0.5) return { ...prev, [dateStr]: { ...current, duree: 0.5 } };
+            const next = { ...prev };
+            delete next[dateStr];
+            return next;
         });
     };
 
-    // --- AJOUT VIA FORMULAIRE BAS ---
-    const handleAddActivity = () => {
-        if (!selectedBCId) return alert("Sélectionnez un BC.");
-        if (isSequentialLocked && userRole !== 'ADMIN') return alert("Mois précédent non validé.");
-
-        const week = weeksInMonth[selectedWeekIndex];
-        const newSelections = { ...selections };
-        let hasChanges = false;
-        let currentIterDate = new Date(week.start);
-        const endDate = new Date(week.end);
-        let inputIndex = 0;
-
-        const targetBC = availableBCs.find(b => String(b.id) === String(selectedBCId));
-        const stats = targetBC ? getDynamicBCStats(targetBC) : { realRemaining: 0 };
-        let budgetBuffer = stats.realRemaining;
-
-        while (currentIterDate <= endDate) {
-            const dayNum = currentIterDate.getDate();
-            const dayOfWeek = currentIterDate.getDay();
-
-            if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-                const val = parseFloat(dailyInput[inputIndex]);
-                if (val > 0 && val <= 1) {
-                    if (dayStatuses[dayNum] === 'VALIDE') {
-                        alert(`Le jour ${dayNum} est déjà validé.`);
-                    } else {
-                        if (budgetBuffer - val < 0) {
-                            alert(`Budget insuffisant le ${dayNum}.`);
-                        } else {
-                            newSelections[dayNum] = {
-                                type: 'BC', val: val, bcId: parseInt(selectedBCId),
-                                description, jira: jiraTicket, taskType: taskType,
-                                date: formatDateForAPI(currentYear, currentMonth, dayNum)
-                            };
-                            hasChanges = true;
-                            budgetBuffer -= val;
-                        }
-                    }
-                }
-                inputIndex++;
-            }
-            currentIterDate.setDate(currentIterDate.getDate() + 1);
+    /** Remplissage rapide : peint 1 JH sur les jours libres passés en paramètre. */
+    const fillDays = (dateStrs) => {
+        if (!selectedBcId) { notify('error', 'Sélectionnez d\'abord un bon de commande.'); return; }
+        const bc = bcs.find((b) => String(b.id) === String(selectedBcId));
+        let restant = bc ? bcRestant(bc) : 0;
+        const additions = {};
+        let manqueBudget = false;
+        dateStrs.forEach((ds) => {
+            if (getDayState(ds).kind !== 'LIBRE') return;
+            if (restant < 0.5) { manqueBudget = true; return; }
+            const duree = Math.min(1.0, restant);
+            additions[ds] = { bcId: parseInt(selectedBcId, 10), duree, isNew: true };
+            restant -= duree;
+        });
+        if (!Object.keys(additions).length) {
+            notify(manqueBudget ? 'error' : 'info',
+                manqueBudget ? `Budget épuisé pour le BC ${bc?.reference || ''}.` : 'Aucun jour libre à remplir.');
+            return;
         }
-
-        if (hasChanges) {
-            setSelections(newSelections);
-            setDailyInput({ 0: '', 1: '', 2: '', 3: '', 4: '' });
-            alert("Activités ajoutées au calendrier !");
-        }
+        setPainted((prev) => ({ ...prev, ...additions }));
+        if (manqueBudget) notify('error', `Budget du BC ${bc?.reference || ''} insuffisant pour tout remplir.`);
     };
 
-    // --- SAUVEGARDE ---
-    const saveData = async (targetStatus) => {
-        if (!selectedConsultant) return alert("Sélectionnez un consultant.");
+    const fillWeek = () => {
+        const todayStr = iso(today.getFullYear(), today.getMonth() + 1, today.getDate());
+        const week = weeks.find((w) => w.includes(todayStr))
+            || weeks.find((w) => w.some((ds) => getDayState(ds).kind === 'LIBRE'));
+        if (week) fillDays(week);
+    };
 
-        if (targetStatus === 'SUBMITTED') {
-            const daysInM = new Date(currentYear, currentMonth, 0).getDate();
-            const missing = [];
-            for(let d=1; d<=daysInM; d++) {
-                const checkDate = new Date(currentYear, currentMonth-1, d);
-                // Vérifier jours ouvrés sans saisie
-                if(checkDate.getDay() !== 0 && checkDate.getDay() !== 6 && !selections[d]) {
-                    missing.push(d);
-                }
+    /** Débloque la correction des jours rejetés : ils redeviennent des jours peints éditables. */
+    const handleCorriger = () => {
+        setPainted((prev) => {
+            const next = { ...prev };
+            rejectedDays.forEach(({ dateStr, saisie }) => {
+                next[dateStr] = {
+                    bcId: saisie.bonDeCommande?.id ?? saisie.bcId, duree: saisie.duree,
+                    desc: saisie.descriptionTache, type: saisie.typePrestation, jira: saisie.ticketJira,
+                    isNew: false,
+                };
+            });
+            return next;
+        });
+        notify('info', 'Jours rejetés débloqués : corrigez-les puis soumettez à nouveau.');
+    };
+
+    // ============================== SAUVEGARDE ==============================
+
+    const buildPayload = (statut) => Object.entries(painted).map(([dateStr, p]) => ({
+        consultantId: parseInt(consultantId, 10),
+        bcId: p.bcId,
+        date: dateStr,
+        duree: p.duree,
+        mode: 'BC',
+        statut,
+        descriptionTache: (p.isNew ? description : p.desc || description) || 'Saisie',
+        typePrestation: (p.isNew ? typePrestation : p.type || typePrestation) || 'PROJET',
+        ticketJira: (p.isNew ? ticketJira : p.jira ?? ticketJira) || '',
+    }));
+
+    /** Jours ouvrés non couverts (ni présence, ni absence, ni férié). */
+    const uncoveredDays = () => weekdays
+        .filter(({ dateStr }) => {
+            if (feries[dateStr] || absences[dateStr] || painted[dateStr]) return false;
+            const s = saisies[dateStr];
+            return !(s && s.statut !== 'REJETE'); // un rejet non corrigé reste « manquant »
+        })
+        .map(({ day }) => day);
+
+    const save = async (submit) => {
+        setMissingDays([]);
+        if (!consultantId) return;
+        if (submit) {
+            const missing = uncoveredDays();
+            if (missing.length) {
+                setMissingDays(missing);
+                notify('error', 'Mois incomplet : des jours ouvrés ne sont pas renseignés.');
+                return;
             }
-            if (missing.length > 0) return alert(`Jours manquants (ni travaillés ni absents) : ${missing.join(', ')}`);
         }
-
-        setLoadingPresence(true);
+        const payload = buildPayload(submit ? 'EN_ATTENTE' : 'BROUILLON');
+        if (!payload.length) {
+            notify('info', 'Aucun jour de présence à enregistrer.');
+            return;
+        }
+        setSaving(true);
         try {
-            const payload = Object.values(selections).map(s => ({
-                consultantId: parseInt(selectedConsultant),
-                bcId: s.type==='BC' ? s.bcId : null,
-                date: s.date,
-                duree: s.val,
-                mode: s.type,
-                statut: targetStatus === 'SUBMITTED' ? 'EN_ATTENTE' : 'BROUILLON',
-                descriptionTache: s.desc || "Saisie",
-                typePrestation: s.taskType || "PROJET",
-                ticketJira: s.jira || ""
-            }));
-
-            if (!payload.length && !confirm("Le calendrier est vide. Continuer ?")) {
-                setLoadingPresence(false); return;
-            }
-
             await api.post('/dashboard/timesheet/bulk', payload);
-            setStatusPresence({ type: 'success', message: targetStatus==='SUBMITTED'?"Envoyé !":"Sauvegardé." });
-            // Le useEffect rechargera les données si besoin au prochain render
-
-        } catch(e) { console.error(e); setStatusPresence({ type: 'error', message: "Erreur technique." }); }
-        finally { setLoadingPresence(false); setTimeout(() => setStatusPresence(null), 3000); }
-    };
-
-    // --- PDF ---
-    const handleDownloadPDF = async (histYear, histMonth) => {
-        const y = (typeof histYear === 'number') ? histYear : currentYear;
-        const m = (typeof histMonth === 'number') ? histMonth : currentMonth;
-        let acts = [];
-        try {
-            const [resT, resA] = await Promise.all([
-                api.get(`/dashboard/timesheet/${selectedConsultant}?annee=${y}&mois=${m}`),
-                api.get(`/dashboard/absences/${selectedConsultant}?annee=${y}&mois=${m}`)
-            ]);
-
-            acts = [
-                ...resT.data.map(t => ({
-                    date: t.date, val: t.duree, type: 'BC',
-                    typePrestation: t.typePrestation||'PROJET',
-                    descriptionTache: t.descriptionTache,
-                    bonDeCommande: t.bonDeCommande || { reference: 'N/A' },
-                    bcId: t.bonDeCommande?.id || t.bcId,
-                    type: 'BC', statut: t.statut
-                })),
-                ...resA.data.map(a => ({
-                    date: a.date, val: 1.0, type: 'ABS',
-                    descriptionTache: a.motif, bonDeCommande: { reference: '-' },
-                    type: 'ABSENCE', statut: a.statut
-                }))
-            ].sort((a,b) => new Date(a.date)-new Date(b.date));
-
-            const bcStatsMap = {};
-            acts.forEach(a => {
-                if(a.type === 'BC' && a.bonDeCommande) {
-                    const ref = a.bonDeCommande.reference;
-                    // On essaie de retrouver les infos complètes du BC si on les a en local
-                    let budget = "N/A";
-                    const knownBC = availableBCs.find(b => b.id === a.bcId);
-                    if(knownBC) budget = knownBC.joursMax;
-
-                    if(!bcStatsMap[ref]) bcStatsMap[ref] = { reference: ref, budgetInitial: budget, soldeDebut: "N/A", consoMois: 0, reliquatFin: "N/A" };
-                    bcStatsMap[ref].consoMois += a.val;
-                }
-            });
-            const bcSummary = Object.values(bcStatsMap);
-
-            const consultantInfo = consultants.find(c => c.id === parseInt(selectedConsultant)) || { nom: "Consultant", prenom: "" };
-
-            generateTimesheetPDF({
-                consultantName: `${consultantInfo.nom} ${consultantInfo.prenom}`,
-                cabinetName: consultantInfo.cabinet?.nom || "ESN",
-                monthLabel: `${moisNom[m-1]} ${y}`,
-                bcSummary: bcSummary,
-                activities: acts,
-                year: y,
-                month: m
-            });
-
-        } catch(e) { console.error(e); alert("Erreur PDF"); }
-    };
-
-    const getStatusBadge = (s) => {
-        if(s === 'DRAFT') return <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-xs font-black uppercase">Brouillon</span>;
-        if(s === 'EN_ATTENTE') return <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-black uppercase">En Validation</span>;
-        if(s === 'VALIDE') return <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-black uppercase flex items-center gap-1"><CheckCircle2 size={12}/> Validé</span>;
-        return null;
-    };
-
-    const renderDailyInputs = () => {
-        if (!weeksInMonth[selectedWeekIndex]) return null;
-        const inputs = [];
-        let date = new Date(weeksInMonth[selectedWeekIndex].start);
-        const endDate = new Date(weeksInMonth[selectedWeekIndex].end);
-        let idx = 0;
-        while (date <= endDate) {
-            const dayName = date.toLocaleDateString('fr-FR', { weekday: 'short' });
-            const dayNum = date.getDate();
-            const currentIdx = idx;
-            inputs.push(
-                <div key={dayNum} className="flex-1 min-w-[60px]">
-                    <div className="text-[10px] text-center font-bold text-gray-400 uppercase mb-1">{dayName} {dayNum}</div>
-                    <input
-                        type="number" step="0.5" min="0" max="1"
-                        className="w-full h-10 text-center font-bold border border-gray-200 rounded-lg focus:border-[#003366] outline-none text-[#003366]"
-                        placeholder="-"
-                        value={dailyInput[currentIdx] || ''}
-                        onChange={(e) => {
-                            const val = e.target.value;
-                            if (val === '' || (parseFloat(val) >= 0 && parseFloat(val) <= 1)) {
-                                setDailyInput(prev => ({ ...prev, [currentIdx]: val }));
-                            }
-                        }}
-                    />
-                </div>
-            );
-            date.setDate(date.getDate() + 1);
-            if (date.getDay() !== 0 && date.getDay() !== 6) idx++;
+            notify('success', submit
+                ? 'Mois soumis pour validation.'
+                : 'Brouillon enregistré.');
+            setRefreshKey((k) => k + 1);
+        } catch (err) {
+            const data = err.response?.data;
+            notify('error', (typeof data === 'string' ? data : data?.message) || 'Erreur technique lors de l\'enregistrement.');
+        } finally {
+            setSaving(false);
         }
-        return inputs;
     };
+
+    const sendAbsenceRequest = async () => {
+        if (!absSelection.length) return;
+        setSaving(true);
+        try {
+            const runs = contiguousRuns(absSelection);
+            for (const run of runs) {
+                // eslint-disable-next-line no-await-in-loop
+                await api.post('/dashboard/absences/demande', {
+                    consultantId: parseInt(consultantId, 10),
+                    dateDebut: run.debut,
+                    dateFin: run.fin,
+                    motif: absMotif,
+                });
+            }
+            notify('success', `Demande d'absence envoyée (${runs.length} période${runs.length > 1 ? 's' : ''}).`);
+            setAbsSelection([]);
+            setUiMode('PRESENCE');
+            setRefreshKey((k) => k + 1);
+        } catch (err) {
+            const data = err.response?.data;
+            notify('error', (typeof data === 'string' ? data : data?.message) || 'Erreur lors de l\'envoi de la demande.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const changeMonth = (delta) => {
+        let m = mois + delta;
+        let y = annee;
+        if (m < 1) { m = 12; y -= 1; }
+        if (m > 12) { m = 1; y += 1; }
+        setMois(m); setAnnee(y);
+    };
+
+    // ============================== RENDU ==============================
+
+    const renderTimeline = () => {
+        const isRejected = monthStep === 'REJETE';
+        const steps = [
+            { key: 'BROUILLON', label: 'Brouillon' },
+            { key: 'SOUMIS', label: 'Soumis' },
+            isRejected ? { key: 'REJETE', label: 'Rejeté' } : { key: 'VALIDE', label: 'Validé' },
+        ];
+        const reachedIdx = { BROUILLON: 0, SOUMIS: 1, VALIDE: 2, REJETE: 2 }[monthStep];
+        return (
+            <Card className="!p-4">
+                <div className="flex flex-wrap items-center gap-4">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">
+                        Statut du mois
+                    </span>
+                    <div className="flex items-center">
+                        {steps.map((step, i) => {
+                            const reached = i <= reachedIdx;
+                            const isRed = step.key === 'REJETE';
+                            const color = !reached ? '#cbd5e1' : isRed ? COLORS.red
+                                : step.key === 'VALIDE' ? COLORS.green : COLORS.blue;
+                            return (
+                                <div key={step.key} className="flex items-center">
+                                    {i > 0 && <div className="w-10 h-0.5 mx-1" style={{ backgroundColor: reached ? color : '#e2e8f0' }} />}
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="w-5 h-5 rounded-full flex items-center justify-center"
+                                              style={{ backgroundColor: color }}>
+                                            {isRed && reached
+                                                ? <XCircle size={12} className="text-white" />
+                                                : <CheckCircle2 size={12} className="text-white" />}
+                                        </span>
+                                        <span className="text-xs font-bold" style={{ color: reached ? color : '#94a3b8' }}>
+                                            {step.label}
+                                        </span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+                {isRejected && rejectedDays.length > 0 && (
+                    <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3">
+                        <div className="text-xs font-bold text-red-700 mb-2 flex items-center gap-2">
+                            <AlertTriangle size={14} /> Jours rejetés à corriger :
+                        </div>
+                        <ul className="text-xs text-red-600 space-y-1 mb-3">
+                            {rejectedDays.map(({ dateStr, saisie }) => (
+                                <li key={dateStr}>
+                                    <span className="font-bold">{new Date(`${dateStr}T00:00:00`).toLocaleDateString('fr-FR')}</span>
+                                    {' — '}{saisie.motifRejet || 'Motif non précisé'}
+                                </li>
+                            ))}
+                        </ul>
+                        <Button variant="danger" onClick={handleCorriger}>
+                            <Wrench size={14} /> Corriger
+                        </Button>
+                    </div>
+                )}
+            </Card>
+        );
+    };
+
+    const renderDayCell = ({ day, dateStr }) => {
+        const state = getDayState(dateStr);
+        const p = painted[dateStr];
+        const s = saisies[dateStr];
+        const abs = absences[dateStr];
+        const selectedForAbs = absSelection.includes(dateStr);
+
+        let cls = 'bg-white hover:border-gray-400 cursor-pointer';
+        let style = {};
+        let title = '';
+        let content = null;
+
+        switch (state.kind) {
+            case 'FERIE':
+                cls = 'cursor-not-allowed';
+                style = { backgroundColor: '#dbeafe', color: COLORS.blue };
+                title = `Férié : ${feries[dateStr]}`;
+                content = <span className="text-[10px] font-black flex items-center gap-0.5"><Palmtree size={10} /> JF</span>;
+                break;
+            case 'ABS_VALIDE':
+                cls = 'cursor-not-allowed text-white';
+                style = { backgroundColor: COLORS.red };
+                title = `Absence validée : ${abs.motif || ''}`;
+                content = <span className="text-[10px] font-black flex items-center gap-0.5"><Lock size={9} /> ABS</span>;
+                break;
+            case 'ABS_ATTENTE':
+                cls = 'cursor-not-allowed';
+                style = {
+                    color: '#92400e',
+                    background: 'repeating-linear-gradient(45deg, #fef3c7, #fef3c7 5px, #fde68a 5px, #fde68a 10px)',
+                };
+                title = `Demande d'absence en cours (${abs.motif || ''})`;
+                content = <span className="text-[10px] font-black">ABS ?</span>;
+                break;
+            case 'SAISIE_VALIDE':
+                cls = 'cursor-not-allowed';
+                style = { backgroundColor: '#e2e8f0', color: '#475569' };
+                title = `Validé — ${s.bonDeCommande?.reference || ''} (${s.duree} JH)`;
+                content = (
+                    <span className="text-[9px] font-bold flex items-center gap-0.5">
+                        <Lock size={9} /> {s.duree} j
+                    </span>
+                );
+                break;
+            case 'SAISIE_ATTENTE':
+                cls = 'cursor-not-allowed';
+                style = { backgroundColor: '#dbeafe', color: '#1e40af' };
+                title = `Soumis, en attente de validation — ${s.bonDeCommande?.reference || ''}`;
+                content = (
+                    <span className="text-[9px] font-bold flex items-center gap-0.5">
+                        <Lock size={9} /> {s.duree} j
+                    </span>
+                );
+                break;
+            case 'REJETE':
+                cls = 'cursor-not-allowed border-red-400 bg-red-50 text-red-600';
+                title = `Rejeté : ${s.motifRejet || 'motif non précisé'} — cliquez sur « Corriger »`;
+                content = <span className="text-[10px] font-black">Rejeté</span>;
+                break;
+            case 'PAINTED':
+                cls = 'cursor-pointer text-white';
+                style = { backgroundColor: COLORS.blue };
+                title = `${bcRef(p.bcId)} — ${p.duree} JH (cliquer : 1 → 0.5 → retirer)`;
+                content = (
+                    <span className="text-[8px] font-bold leading-tight text-center">
+                        {bcRef(p.bcId)}<br />{p.duree} j
+                    </span>
+                );
+                break;
+            default: // LIBRE
+                if (uiMode === 'ABSENCE') {
+                    cls = selectedForAbs
+                        ? 'cursor-pointer border-2 border-dashed border-red-400 bg-red-100 text-red-700'
+                        : 'bg-white hover:border-red-300 cursor-pointer';
+                    if (selectedForAbs) content = <span className="text-[9px] font-black">ABS</span>;
+                }
+                break;
+        }
+
+        return (
+            <div key={dateStr}
+                 onClick={() => handleDayClick(dateStr)}
+                 title={title}
+                 className={`h-14 rounded-lg border border-gray-200 flex flex-col items-center justify-center gap-0.5 transition-all select-none ${cls}`}
+                 style={style}>
+                <span className="text-xs font-black">{day}</span>
+                {content}
+            </div>
+        );
+    };
+
+    const renderCalendar = () => {
+        const nbJours = new Date(annee, mois, 0).getDate();
+        const firstDow = new Date(annee, mois - 1, 1).getDay(); // 0 = dim
+        const blanks = firstDow === 0 ? 6 : firstDow - 1;
+        const weekdayByDay = Object.fromEntries(weekdays.map((wd) => [wd.day, wd]));
+        return (
+            <div className="grid grid-cols-7 gap-1.5">
+                {JOURS_ENTETE.map((j) => (
+                    <div key={j} className="text-center text-[10px] font-black uppercase text-gray-400 py-1">{j}</div>
+                ))}
+                {Array.from({ length: blanks }, (_, i) => <div key={`b-${i}`} className="h-14" />)}
+                {Array.from({ length: nbJours }, (_, i) => {
+                    const day = i + 1;
+                    const wd = weekdayByDay[day];
+                    if (!wd) {
+                        return (
+                            <div key={`we-${day}`} className="h-14 rounded-lg bg-gray-50 flex items-center justify-center">
+                                <span className="text-xs font-bold text-gray-300">{day}</span>
+                            </div>
+                        );
+                    }
+                    return renderDayCell(wd);
+                })}
+            </div>
+        );
+    };
+
+    const canSubmit = consultantId && prevMonthOk && monthStep !== 'VALIDE' && monthStep !== 'SOUMIS' && !saving;
+    const canSaveDraft = consultantId && monthStep !== 'VALIDE' && !saving;
 
     return (
-        <div className="mx-auto max-w-6xl p-4 space-y-6 font-sans text-slate-800">
-            {/* Header */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div className="flex items-center gap-4">
-                    <div className="bg-[#003366] p-2 rounded-lg"><CalendarCheck className="text-white" size={24}/></div>
-                    <div>
-                        <h2 className="text-lg font-black text-[#003366] uppercase">Gestion des Temps</h2>
-                        {userRole !== 'ADMIN' && <div className="text-xs text-gray-500 font-bold">{moisNom[currentMonth-1]} {currentYear} • Consultant</div>}
+        <div className="mx-auto max-w-6xl p-4 space-y-5">
+            <PageHeader
+                icon={CalendarCheck}
+                title="Ma Présence (RPI)"
+                subtitle="Relevé de présence individuel : peignez vos jours sur un bon de commande, puis soumettez le mois."
+                actions={(
+                    <>
+                        <Button variant="outline" disabled={!canSaveDraft} onClick={() => save(false)}>
+                            <Save size={16} /> Enregistrer (brouillon)
+                        </Button>
+                        <Button variant="primary" disabled={!canSubmit} onClick={() => save(true)}>
+                            <Send size={16} /> Soumettre le mois
+                        </Button>
+                    </>
+                )}
+            />
+
+            {/* Sélection consultant + navigation mois */}
+            <Card className="!p-4 flex flex-wrap items-center gap-4">
+                {!isConsultant && (
+                    <div className="flex items-center gap-2">
+                        <Users size={16} style={{ color: COLORS.blue }} />
+                        <select
+                            className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none cursor-pointer"
+                            style={{ color: COLORS.blue }}
+                            value={consultantId}
+                            onChange={(e) => setConsultantId(e.target.value)}>
+                            <option value="">-- Consultant --</option>
+                            {consultants.map((c) => (
+                                <option key={c.id} value={c.id}>{c.nom} {c.prenom}</option>
+                            ))}
+                        </select>
                     </div>
+                )}
+                <div className="flex items-center gap-1">
+                    <button onClick={() => changeMonth(-1)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Mois précédent">
+                        <ChevronLeft size={16} />
+                    </button>
+                    <span className="text-sm font-black uppercase w-36 text-center" style={{ color: COLORS.blue }}>
+                        {MOIS[mois - 1]} {annee}
+                    </span>
+                    <button onClick={() => changeMonth(1)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Mois suivant">
+                        <ChevronRight size={16} />
+                    </button>
                 </div>
-                <div className="flex flex-wrap gap-3 items-center w-full md:w-auto">
-                    {userRole === 'ADMIN' && (
-                        <div className="flex items-center gap-2 bg-blue-50 p-1.5 rounded-lg border border-blue-100">
-                            <Users size={16} className="text-[#003366] ml-2"/>
-                            <select className="bg-transparent text-sm font-bold text-[#003366] outline-none cursor-pointer p-1 min-w-[150px]" value={selectedConsultant} onChange={e => setSelectedConsultant(e.target.value)}>
-                                <option value="">-- Consultant --</option>
-                                {consultants.map(c => <option key={c.id} value={c.id}>{c.nom} {c.prenom}</option>)}
-                            </select>
+                {loading && <span className="text-xs font-bold text-gray-400 animate-pulse">Chargement…</span>}
+            </Card>
+
+            {!consultantId ? (
+                <Card className="flex flex-col items-center justify-center py-16 text-gray-400">
+                    <Users size={40} className="mb-3 opacity-30" />
+                    <p className="font-bold">Sélectionnez un consultant pour afficher sa présence.</p>
+                </Card>
+            ) : (
+                <>
+                    {renderTimeline()}
+
+                    {!prevMonthOk && (
+                        <div className="bg-amber-50 border-l-4 border-amber-500 rounded-r-xl p-4 flex items-start gap-3">
+                            <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+                            <div>
+                                <p className="text-sm font-bold text-amber-800">Mois précédent non validé</p>
+                                <p className="text-xs text-amber-700">
+                                    La soumission de {MOIS[mois - 1]} {annee} est bloquée tant que le mois précédent
+                                    n'est pas entièrement validé. Vous pouvez toutefois enregistrer un brouillon.
+                                </p>
+                            </div>
                         </div>
                     )}
-                    <select className="bg-gray-50 border border-gray-200 text-[#003366] font-bold p-2.5 rounded-lg outline-none cursor-pointer text-sm" value={currentYear} onChange={e => setCurrentYear(parseInt(e.target.value))}>
-                        {annees.map(y => <option key={y} value={y}>{y}</option>)}
-                    </select>
-                    <div className="h-8 w-[1px] bg-gray-200 mx-2 hidden md:block"></div>
-                    <button onClick={() => handleDownloadPDF(currentYear, currentMonth)} disabled={!(monthStatus === 'VALIDE' || (userRole === 'ADMIN' && monthStatus === 'EN_ATTENTE'))} className={`px-4 py-2 border font-bold text-xs rounded-lg flex items-center gap-2 ${monthStatus === 'VALIDE' || (userRole === 'ADMIN' && monthStatus === 'EN_ATTENTE') ? 'bg-[#C5A059] text-white border-[#C5A059] hover:bg-[#b08d4d]' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}><FileDown size={14}/> PDF</button>
-                    <button onClick={() => saveData('DRAFT')} disabled={!selectedConsultant || monthStatus === 'VALIDE'} className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-bold text-xs rounded-lg hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"><Save size={14}/> SAUVEGARDER</button>
-                    <button onClick={() => { if(confirm("Envoyer le mois ?")) saveData('SUBMITTED'); }} disabled={!selectedConsultant || monthStatus === 'VALIDE'} className="px-4 py-2 bg-[#2D6A4F] text-white font-bold text-xs rounded-lg hover:bg-[#1b4332] flex items-center gap-2 shadow-sm disabled:opacity-50"><CheckCircle2 size={14}/> ENVOYER</button>
-                </div>
-            </div>
 
-            {isSequentialLocked && userRole !== 'ADMIN' && <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-4 rounded-r-lg flex"><AlertTriangle className="h-5 w-5 text-red-500" /><div className="ml-3"><p className="text-sm text-red-700 font-bold">Mois précédent non envoyé</p><p className="text-xs text-red-600">Veuillez envoyer/valider le mois précédent.</p></div></div>}
-
-            {!selectedConsultant ? <div className="flex flex-col items-center justify-center p-20 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400"><Search size={48} className="mb-4 opacity-20" /><p className="font-bold text-lg">Sélectionnez un consultant</p></div> : (
-                <>
-                    {/* RÉCAPITULATIF DU MOIS */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 flex flex-col md:flex-row gap-6 items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            <div className="bg-gray-50 p-3 rounded-full border border-gray-100"><Activity size={24} className="text-[#C5A059]"/></div>
+                    {missingDays.length > 0 && (
+                        <div className="bg-red-50 border-l-4 border-red-500 rounded-r-xl p-4 flex items-start gap-3">
+                            <AlertTriangle size={18} className="text-red-600 mt-0.5 shrink-0" />
                             <div>
-                                <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Statut du mois</div>
-                                <div className="mt-1">{getStatusBadge(monthStatus)}</div>
+                                <p className="text-sm font-bold text-red-700">Impossible de soumettre : jours ouvrés non renseignés</p>
+                                <p className="text-xs text-red-600">
+                                    Chaque jour ouvré doit être couvert (présence, absence ou férié).
+                                    Jours manquants : <span className="font-bold">{missingDays.join(', ')}</span>.
+                                </p>
                             </div>
                         </div>
-                        <div className="flex-1 w-full md:w-auto grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
-                                <div className="text-[9px] font-bold text-blue-400 uppercase">Total Travaillé</div>
-                                <div className="text-xl font-black text-[#003366]">{recap.totalWorked} <span className="text-[10px]">JH</span></div>
-                            </div>
-                            <div className="bg-red-50/50 p-3 rounded-xl border border-red-100">
-                                <div className="text-[9px] font-bold text-red-400 uppercase">Absences</div>
-                                <div className="text-xl font-black text-red-600">{recap.totalAbs} <span className="text-[10px]">JH</span></div>
-                            </div>
-                            <div className="bg-green-50/50 p-3 rounded-xl border border-green-100">
-                                <div className="text-[9px] font-bold text-green-600 uppercase">Fériés</div>
-                                <div className="text-xl font-black text-green-700">{recap.totalFerie} <span className="text-[10px]">JH</span></div>
-                            </div>
-                            {Object.keys(recap.bcDetails).length > 0 && (
-                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 overflow-y-auto max-h-[60px]">
-                                    <div className="text-[9px] font-bold text-gray-400 uppercase mb-1">Détail BC</div>
-                                    {availableBCs.filter(bc => recap.bcDetails[bc.id]).map(bc => (
-                                        <div key={bc.id} className="text-[10px] font-bold text-gray-600 flex justify-between">
-                                            <span className="truncate w-16">{bc.reference}</span>
-                                            <span>{recap.bcDetails[bc.id]}j</span>
-                                        </div>
-                                    ))}
+                    )}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                        {/* ===== Colonne calendrier ===== */}
+                        <Card className="lg:col-span-2">
+                            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                                {/* Mode de saisie */}
+                                <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+                                    <button
+                                        onClick={() => setUiMode('PRESENCE')}
+                                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${uiMode === 'PRESENCE' ? 'bg-white shadow-sm' : 'text-gray-500'}`}
+                                        style={uiMode === 'PRESENCE' ? { color: COLORS.blue } : {}}>
+                                        Présence
+                                    </button>
+                                    <button
+                                        onClick={() => setUiMode('ABSENCE')}
+                                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${uiMode === 'ABSENCE' ? 'bg-white shadow-sm' : 'text-gray-500'}`}
+                                        style={uiMode === 'ABSENCE' ? { color: COLORS.red } : {}}>
+                                        Absence
+                                    </button>
                                 </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* GRILLE APERÇU MOIS (Lecture Seule / Suppression simple) */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-                        <div className="flex justify-between mb-4 items-center flex-wrap gap-4">
-                            <div className="flex items-center gap-3">
-                                <button onClick={() => setCurrentMonth(m => m > 1 ? m-1 : 12)} className="p-1.5 hover:bg-gray-100 rounded-lg"><ChevronLeft size={16}/></button>
-                                <h3 className="text-sm font-black text-[#003366] uppercase w-24 text-center">{moisNom[currentMonth-1]}</h3>
-                                <button onClick={() => setCurrentMonth(m => m < 12 ? m+1 : 1)} className="p-1.5 hover:bg-gray-100 rounded-lg"><ChevronRight size={16}/></button>
-                            </div>
-
-                            <div className="flex gap-4 items-center">
-                                {/* ✅ AJOUT DU SÉLECTEUR DE BC POUR LA GRILLE */}
-                                {inputMode === 'BC' && (
-                                    <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-lg border border-blue-100 animate-in fade-in zoom-in">
-                                        <span className="text-[10px] font-bold text-[#003366] uppercase">BC Actif:</span>
-                                        <select className="bg-transparent text-xs font-bold text-[#003366] outline-none cursor-pointer min-w-[100px]" value={selectedBCId} onChange={e => setSelectedBCId(e.target.value)}>
-                                            {availableBCs.length === 0 && <option value="">Aucun BC</option>}
-                                            {availableBCs.map(bc => <option key={bc.id} value={bc.id}>{bc.reference}</option>)}
-                                        </select>
+                                {/* Remplissage rapide */}
+                                {uiMode === 'PRESENCE' && (
+                                    <div className="flex gap-2">
+                                        <Button variant="secondary" className="!py-1.5 !px-3 !text-xs" onClick={fillWeek}>
+                                            <Wand2 size={13} /> Remplir la semaine
+                                        </Button>
+                                        <Button variant="secondary" className="!py-1.5 !px-3 !text-xs"
+                                                onClick={() => fillDays(weekdays.map((w) => w.dateStr))}>
+                                            <CalendarRange size={13} /> Remplir le mois
+                                        </Button>
                                     </div>
                                 )}
+                            </div>
 
-                                <div className="flex gap-2">
-                                    <button onClick={() => setInputMode('BC')} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${inputMode === 'BC' ? 'bg-[#003366] text-white shadow-lg' : 'bg-gray-100 hover:bg-gray-200'}`}>Travaillé</button>
-                                    <button onClick={() => setInputMode('ABSENCE')} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${inputMode === 'ABSENCE' ? 'bg-red-500 text-white shadow-lg' : 'bg-gray-100 hover:bg-gray-200'}`}>Absence</button>
-                                    <button onClick={() => setInputMode('FERIE')} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${inputMode === 'FERIE' ? 'bg-green-600 text-white shadow-lg' : 'bg-gray-100 hover:bg-gray-200'}`}>Férié</button>
-                                </div>
+                            {renderCalendar()}
+
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4 text-[10px] font-bold text-gray-500">
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.blue }} /> Présence</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ backgroundColor: '#dbeafe' }} /> Férié / Soumis</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.red }} /> Absence validée</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ background: 'repeating-linear-gradient(45deg,#fef3c7,#fef3c7 3px,#fde68a 3px,#fde68a 6px)' }} /> Absence en attente</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ backgroundColor: '#e2e8f0' }} /> Validé</span>
+                            </div>
+                        </Card>
+
+                        {/* ===== Colonne latérale ===== */}
+                        <div className="space-y-5">
+                            {uiMode === 'ABSENCE' ? (
+                                /* --- Panneau demande d'absence --- */
+                                <Card>
+                                    <h3 className="text-sm font-black uppercase mb-3 flex items-center gap-2" style={{ color: COLORS.red }}>
+                                        <Palmtree size={16} /> Demande d'absence
+                                    </h3>
+                                    <p className="text-xs text-gray-500 mb-3">
+                                        Cliquez sur les jours libres du calendrier pour les sélectionner,
+                                        puis envoyez votre demande. Elle sera soumise à validation.
+                                    </p>
+                                    <div className="mb-3">
+                                        <label className="text-[10px] uppercase font-bold text-gray-400">Jours sélectionnés</label>
+                                        {absSelection.length === 0 ? (
+                                            <p className="text-xs text-gray-400 mt-1 italic">Aucun jour sélectionné.</p>
+                                        ) : (
+                                            <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                                {[...absSelection].sort().map((ds) => (
+                                                    <span key={ds} className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                                                        {new Date(`${ds}T00:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="mb-4">
+                                        <label className="text-[10px] uppercase font-bold text-gray-400">Motif</label>
+                                        <select
+                                            className="w-full mt-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                                            value={absMotif}
+                                            onChange={(e) => setAbsMotif(e.target.value)}>
+                                            {MOTIFS_ABSENCE.map((m) => <option key={m} value={m}>{m}</option>)}
+                                        </select>
+                                    </div>
+                                    <Button variant="danger" className="w-full justify-center"
+                                            disabled={!absSelection.length || saving}
+                                            onClick={sendAbsenceRequest}>
+                                        <Send size={14} /> Envoyer la demande
+                                    </Button>
+                                </Card>
+                            ) : (
+                                <>
+                                    {/* --- Sélecteur de BC --- */}
+                                    <Card>
+                                        <h3 className="text-sm font-black uppercase mb-3 flex items-center gap-2" style={{ color: COLORS.blue }}>
+                                            <Briefcase size={16} /> Bon de commande actif
+                                        </h3>
+                                        {bcs.length === 0 ? (
+                                            <p className="text-xs text-gray-400 italic">Aucun bon de commande affecté.</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {bcs.map((bc) => {
+                                                    const active = String(bc.id) === String(selectedBcId);
+                                                    return (
+                                                        <button key={bc.id}
+                                                                onClick={() => setSelectedBcId(String(bc.id))}
+                                                                className={`w-full text-left p-3 rounded-xl border transition-all ${active ? 'border-2 shadow-sm' : 'border-gray-200 hover:border-gray-300'}`}
+                                                                style={active ? { borderColor: COLORS.green, backgroundColor: '#f0fdf4' } : {}}>
+                                                            <BudgetGauge label={bc.reference} consomme={bcConso(bc)} max={bc.joursMax || 0} />
+                                                            {bc.designation && (
+                                                                <div className="text-[10px] text-gray-400 mt-1 truncate">{bc.designation}</div>
+                                                            )}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </Card>
+
+                                    {/* --- Description des nouveaux jours --- */}
+                                    <Card>
+                                        <h3 className="text-sm font-black uppercase mb-3" style={{ color: COLORS.blue }}>
+                                            Description des saisies
+                                        </h3>
+                                        <p className="text-[10px] text-gray-400 mb-3">
+                                            Appliquée aux nouveaux jours peints lors de l'enregistrement.
+                                        </p>
+                                        <div className="space-y-3">
+                                            <input
+                                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-gray-400"
+                                                placeholder="Description de l'activité…"
+                                                value={description}
+                                                onChange={(e) => setDescription(e.target.value)} />
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <select
+                                                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                                                    value={typePrestation}
+                                                    onChange={(e) => setTypePrestation(e.target.value)}>
+                                                    <option value="PROJET">PROJET</option>
+                                                    <option value="RUN">RUN</option>
+                                                </select>
+                                                <input
+                                                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-gray-400"
+                                                    placeholder="Ticket Jira"
+                                                    value={ticketJira}
+                                                    onChange={(e) => setTicketJira(e.target.value)} />
+                                            </div>
+                                        </div>
+                                    </Card>
+                                </>
+                            )}
+
+                            {/* --- Récapitulatif --- */}
+                            <div className="grid grid-cols-2 gap-3">
+                                <StatCard label="Jours travaillés" value={recap.joursTravailles} unit="j" />
+                                <StatCard label="Absences" value={recap.nbAbsences} unit="j" accent={COLORS.red} />
+                                <StatCard label="Fériés" value={recap.nbFeries} unit="j" accent={COLORS.gold} />
+                                <StatCard label="Total JH mois" value={recap.totalJH} accent={COLORS.green} />
                             </div>
                         </div>
-                        <div className="grid grid-cols-7 gap-1">{[...Array(new Date(currentYear, currentMonth - 1, 1).getDay() === 0 ? 6 : new Date(currentYear, currentMonth - 1, 1).getDay() - 1)].map((_, i) => <div key={`e-${i}`} className="h-12 bg-gray-50 rounded-md"></div>)}{[...Array(new Date(currentYear, currentMonth, 0).getDate())].map((_, i) => { const day = i + 1; const sel = selections[day]; const isWk = [0,6].includes(new Date(currentYear, currentMonth-1, day).getDay()); let bgColor = isWk ? 'bg-gray-50' : 'bg-white'; let textColor = 'text-gray-300'; if (sel) { if (sel.type === 'BC') { bgColor = 'bg-[#003366]'; textColor = 'text-white'; } else if (sel.type === 'ABS' || sel.type === 'ABSENCE') { bgColor = 'bg-red-500'; textColor = 'text-white'; } else if (sel.type === 'FERIE') { bgColor = 'bg-green-600'; textColor = 'text-white'; } } const isLocked = monthStatus === 'VALIDE' || dayStatuses[day] === 'VALIDE' || (isSequentialLocked && userRole !== 'ADMIN'); return (<div key={day} className={`h-12 rounded-md border border-gray-100 flex flex-col items-center justify-center ${bgColor} relative ${!isLocked && !isWk ? 'cursor-pointer hover:border-[#003366]' : 'cursor-not-allowed opacity-80'}`} onClick={() => !isLocked && toggleDay(day)}><span className={`text-xs font-black ${textColor}`}>{day}</span>{sel && <span className={`text-[9px] font-bold ${textColor}`}>{sel.val} j</span>}{isLocked && <Lock size={10} className="absolute top-1 right-1 opacity-50 text-gray-400"/>}</div>) })}</div>
                     </div>
-
-                    {/* FORMULAIRE BAS */}
-                    <div className="bg-[#f8fafc] rounded-2xl border border-gray-200 p-6 shadow-inner">
-                        <h3 className="text-sm font-black text-[#003366] uppercase mb-6 flex items-center gap-2"><Briefcase size={18} className="text-[#C5A059]"/> Saisie Hebdomadaire</h3>
-                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                            <div className="lg:col-span-4 space-y-4"><div><label className="text-[10px] font-bold text-gray-500 uppercase">Semaine</label><div className="flex overflow-x-auto gap-2 pb-2 mt-1 scrollbar-hide">{weeksInMonth.map((w, i) => (<button key={i} onClick={() => { setSelectedWeekIndex(i); setDailyInput({0:'',1:'',2:'',3:'',4:''}); }} className={`px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap border ${selectedWeekIndex === i ? 'bg-[#003366] text-white border-[#003366]' : 'bg-white text-gray-500 border-gray-200'}`}>{w.label}</button>))}</div></div><div><label className="text-[10px] font-bold text-gray-500 uppercase">Bon de Commande</label><select className="w-full mt-1 p-2 bg-white border border-gray-200 rounded-lg text-xs font-bold text-[#003366]" value={selectedBCId} onChange={e => setSelectedBCId(e.target.value)}>{availableBCs.map(bc => <option key={bc.id} value={bc.id}>{bc.reference} (Reste: {getDynamicBCStats(bc).remaining}j)</option>)}</select></div><div className="grid grid-cols-2 gap-2"><div><label className="text-[10px] font-bold text-gray-500 uppercase">Type</label><select className="w-full mt-1 p-2 bg-white border border-gray-200 rounded-lg text-xs font-bold" value={taskType} onChange={e => setTaskType(e.target.value)}><option value="PROJET">PROJET</option><option value="RUN">RUN</option><option value="AUTRE">AUTRE</option></select></div><div><label className="text-[10px] font-bold text-gray-500 uppercase">Jira</label><input className="w-full mt-1 p-2 bg-white border border-gray-200 rounded-lg text-xs font-bold" value={jiraTicket} onChange={e => setJiraTicket(e.target.value)} /></div></div></div>
-                            <div className="lg:col-span-8 space-y-4"><div><label className="text-[10px] font-bold text-gray-500 uppercase">Description</label><input className="w-full mt-1 p-3 bg-white border border-gray-200 rounded-lg text-sm font-medium focus:border-[#C5A059] outline-none" value={description} onChange={e => setDescription(e.target.value)} /></div><div className="bg-white p-4 rounded-xl border border-gray-200"><label className="text-[10px] font-bold text-gray-500 uppercase mb-3 block">Répartition</label><div className="flex gap-2 overflow-x-auto">{renderDailyInputs()}</div></div><div className="flex justify-end pt-2"><button onClick={handleAddActivity} className="bg-[#003366] text-white px-6 py-3 rounded-xl font-bold text-xs uppercase shadow-lg hover:bg-[#002244]"><Plus size={16}/> Ajouter</button></div></div>
-                        </div>
-                    </div>
-
-                    {yearHistory.length > 0 && <div className="mt-8 mb-8 p-6 bg-gray-50 rounded-2xl border border-gray-200"><h3 className="text-sm font-black text-[#003366] uppercase mb-4 flex items-center gap-2"><CheckCircle2 size={18}/> Historique Validé</h3><div className="grid grid-cols-1 md:grid-cols-3 gap-4">{yearHistory.map((h, idx) => (<div key={idx} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex justify-between items-center"><div><div className="text-xs font-bold text-gray-500 uppercase">{h.label}</div><div className="text-[#2D6A4F] text-xs font-black uppercase mt-1">Validé</div></div><button onClick={() => handleDownloadPDF(h.year, h.month)} className="px-3 py-2 bg-[#C5A059] text-white rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-[#b08d4d]"><FileDown size={14}/> PDF</button></div>))}</div></div>}
-
-                    <div className="mt-8"><h3 className="text-sm font-black text-[#003366] uppercase mb-4 flex items-center gap-2"><HistoryIcon size={18}/> Détail Saisies</h3>{Object.keys(historyData).length > 0 && <div className="space-y-6">{Object.entries(historyData).map(([week, tasks]) => tasks.length > 0 && (<div key={week} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm"><div className="bg-gray-50 px-4 py-2 border-b border-gray-100 flex justify-between"><span className="text-xs font-black text-[#003366] uppercase">{week}</span><span className="text-[10px] font-bold text-gray-500">Total: {tasks.reduce((acc, t) => acc + t.duration, 0)} JH</span></div><table className="w-full text-left text-xs"><tbody className="divide-y divide-gray-50">{tasks.map((t, idx) => (<tr key={idx} className="hover:bg-gray-50"><td className="p-3 font-medium text-gray-700">{t.desc}</td><td className="p-3"><span className={`px-2 py-0.5 rounded text-[9px] font-black text-white ${t.type === 'PROJET' ? 'bg-[#003366]' : 'bg-[#C5A059]'}`}>{t.type}</span></td><td className="p-3 font-mono text-gray-500">{t.jira || '-'}</td><td className="p-3 font-black text-[#003366] text-right">{t.duration} j</td></tr>))}</tbody></table></div>))}</div>}</div>
                 </>
             )}
-            {statusPresence && <div className={`fixed bottom-5 right-5 px-6 py-4 rounded-xl shadow-2xl text-white font-bold text-sm flex items-center gap-3 animate-slide-up z-50 ${statusPresence.type === 'success' ? 'bg-[#2D6A4F]' : 'bg-red-500'}`}>{statusPresence.type === 'success' ? <CheckCircle2/> : <AlertTriangle/>}{statusPresence.message}</div>}
+
+            {/* Toast */}
+            {toast && (
+                <div className={`fixed bottom-5 right-5 z-50 px-5 py-3.5 rounded-xl shadow-2xl text-white text-sm font-bold flex items-center gap-3 max-w-md ${
+                    toast.type === 'success' ? 'bg-[#008858]' : toast.type === 'error' ? 'bg-red-600' : 'bg-[#003366]'
+                }`}>
+                    {toast.type === 'success' ? <CheckCircle2 size={18} className="shrink-0" /> : <AlertTriangle size={18} className="shrink-0" />}
+                    {toast.message}
+                </div>
+            )}
         </div>
     );
 };
-
-
 
 export default TimesheetForm;

@@ -38,6 +38,10 @@ public class ProfileController {
         out.put("cabinet", me.getCabinet() != null ? me.getCabinet().getNom() : null);
         out.put("hasSignature", me.getSignatureImage() != null && !me.getSignatureImage().isBlank());
         out.put("signatureImage", me.getSignatureImage());
+        // Périmètre d'un RESPONSABLE : ids + noms des cabinets gérés
+        out.put("cabinetsGeres", me.getCabinetsGeres() == null ? java.util.List.of()
+                : me.getCabinetsGeres().stream()
+                    .map(c -> Map.of("id", c.getId(), "nom", c.getNom())).toList());
         return out;
     }
 

@@ -1,153 +1,139 @@
 import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
-import logoCdg from '../assets/logo_cdg.png';
 
 const CDG_BLUE = '#003366';
-const CDG_GREEN = '#008858';
-const RED_ABS = '#ef4444';
 
-const fmt = (n) => (n == null ? '0' : (Number.isInteger(n) ? String(n) : n.toFixed(1)));
+const fmt = (n) => (n == null ? '0' : (Number.isInteger(n) ? String(n) : Number(n).toFixed(1)));
 
 /**
- * Génère le PDF d'un Rapport d'Activité (RA) mensuel.
- * @param {object} ra - la réponse de l'API (RapportActiviteDTO)
+ * Génère le PDF du Rapport d'Activité mensuel, fidèle au document réel.
+ * @param {object} ra - réponse de GET /api/rapports/activite
  */
 export const generateRaPDF = (ra) => {
     const doc = new jsPDF();
+    let y = 20;
+    const pageGuard = (limit = 270) => {
+        if (y > limit) { doc.addPage(); y = 20; }
+    };
 
-    // ---------- EN-TÊTE ----------
-    try {
-        doc.addImage(logoCdg, 'PNG', 14, 10, 24, 24);
-    } catch (e) {
-        doc.setFillColor(CDG_BLUE); doc.rect(14, 10, 24, 24, 'F');
-    }
-
+    // ---------- TITRE (bleu, à gauche) ----------
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
     doc.setTextColor(CDG_BLUE);
-    doc.text('RAPPORT D\'ACTIVITÉ', 105, 18, { align: 'center' });
+    doc.text("Rapport d'activité", 14, y);
 
-    doc.setFontSize(12);
-    doc.setTextColor(CDG_GREEN);
-    doc.text((ra.moisLabel || '').toUpperCase(), 105, 26, { align: 'center' });
-
-    doc.setDrawColor(200);
-    doc.line(14, 38, 196, 38);
-
-    // ---------- INFOS ----------
+    // ---------- BLOC DROIT : Cabinet / Fonction / Intervenant ----------
     doc.setFontSize(10);
     doc.setTextColor(0);
-    doc.setFont('helvetica', 'bold'); doc.text('Consultant :', 14, 47);
-    doc.setFont('helvetica', 'normal'); doc.text(ra.consultantNom || '—', 42, 47);
+    let yr = 16;
+    const rightLine = (label, value) => {
+        doc.setFont('helvetica', 'bold');
+        const text = `${label} : `;
+        const val = String(value || '—');
+        const wLabel = doc.getTextWidth(text);
+        doc.setFont('helvetica', 'normal');
+        const wVal = doc.getTextWidth(val);
+        const x = 196 - wLabel - wVal;
+        doc.setFont('helvetica', 'bold');
+        doc.text(text, x, yr);
+        doc.setFont('helvetica', 'normal');
+        doc.text(val, x + wLabel, yr);
+        yr += 6;
+    };
+    rightLine('Cabinet', ra.cabinetNom);
+    rightLine('Fonction', ra.fonction);
+    rightLine('Intervenant', ra.consultantNom);
 
-    doc.setFont('helvetica', 'bold'); doc.text('Bon de Commande :', 14, 54);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`${ra.referenceBC || '—'}${ra.designationBC ? ' · ' + ra.designationBC : ''}`, 55, 54);
+    y = Math.max(y, yr) + 10;
 
-    // ---------- TOTAL JH (encadré vert, aligné à droite) ----------
-    doc.setDrawColor(CDG_GREEN);
-    doc.setFillColor(CDG_GREEN);
-    doc.roundedRect(150, 43, 46, 12, 2, 2, 'FD');
+    // ---------- PÉRIODE ----------
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    doc.setTextColor(255);
-    doc.text(`Total : ${fmt(ra.totalJH)} JH`, 173, 51, { align: 'center' });
+    doc.setTextColor(0);
+    doc.text(`Période : ${ra.moisLabel || '—'}`, 14, y);
+    y += 12;
 
-    // ---------- GROUPES D'ACTIVITÉ ----------
-    let y = 64;
-    const groupes = ra.groupes || [];
+    // ---------- BDC UTILISÉS ----------
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(CDG_BLUE);
+    doc.text('BDC Utilisés :', 14, y);
+    y += 7;
 
-    if (groupes.length === 0) {
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(10);
-        doc.setTextColor(90);
-        doc.text('Aucune activité validée.', 14, y);
-        y += 10;
-    } else {
-        groupes.forEach((groupe) => {
-            if (y > 250) { doc.addPage(); y = 20; }
-
-            // Sous-titre du groupe
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(11);
-            doc.setTextColor(CDG_BLUE);
-            doc.text(`${groupe.nature || '—'} — ${fmt(groupe.totalJH)} JH`, 14, y);
-
-            const body = (groupe.lignes || []).map((l) => [
-                l.description || '—',
-                l.typePrestation || '—',
-                l.ticketJira || '—',
-                fmt(l.jh) + ' JH',
-            ]);
-
-            autoTable(doc, {
-                startY: y + 3,
-                head: [['Activité', 'Type', 'Ticket', 'JH']],
-                body,
-                theme: 'grid',
-                headStyles: { fillColor: CDG_BLUE, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 9 },
-                styles: { fontSize: 9, halign: 'center', cellPadding: 2 },
-                columnStyles: {
-                    0: { halign: 'left', cellWidth: 100 },
-                    3: { fontStyle: 'bold', textColor: CDG_GREEN },
-                },
-                margin: { left: 14, right: 14 },
-            });
-
-            y = doc.lastAutoTable.finalY + 12;
-            if (y > 250) { doc.addPage(); y = 20; }
-        });
-    }
-
-    // ---------- SECTIONS NARRATIVES ----------
-    const sections = [
-        ['Synthèse du mois', ra.syntheseMois],
-        ['Faits marquants', ra.faitsMarquants],
-        ['Perspectives', ra.perspectives],
-    ];
-
-    sections.forEach(([titre, texte]) => {
-        if (y > 250) { doc.addPage(); y = 20; }
-
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor(CDG_BLUE);
-        doc.text(titre, 14, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    const bdcs = ra.bdcUtilises || [];
+    if (bdcs.length === 0) {
+        doc.text('• —', 20, y);
         y += 6;
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.setTextColor(0);
-        const lines = doc.splitTextToSize(texte || '—', 180);
-        lines.forEach((line) => {
-            if (y > 275) { doc.addPage(); y = 20; }
-            doc.text(line, 14, y);
+    } else {
+        bdcs.forEach((b) => {
+            pageGuard();
+            doc.text(`• ${b.reference || '—'} : ${fmt(b.jours)} Jours`, 20, y);
             y += 6;
         });
+    }
+    y += 8;
+
+    // ---------- TÂCHES RÉALISÉES ----------
+    pageGuard(260);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(CDG_BLUE);
+    doc.text('Tâches réalisées :', 14, y);
+    y += 7;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    const taches = (ra.tachesRealisees || '')
+        .split('\n')
+        .map((l) => l.trim().replace(/^•\s*/, ''))
+        .filter(Boolean);
+    if (taches.length === 0) {
+        doc.text('• —', 20, y);
         y += 6;
-    });
+    } else {
+        taches.forEach((t) => {
+            const lines = doc.splitTextToSize(`• ${t}`, 170);
+            lines.forEach((line, li) => {
+                pageGuard();
+                doc.text(line, li === 0 ? 20 : 23, y);
+                y += 6;
+            });
+        });
+    }
+    y += 16;
 
     // ---------- SIGNATURES ----------
-    if (y > 250) { doc.addPage(); y = 30; }
-    doc.setDrawColor(150);
-    doc.rect(14, y, 80, 30);
-    doc.rect(110, y, 80, 30);
+    if (y > 240) { doc.addPage(); y = 30; }
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(10);
     doc.setTextColor(CDG_BLUE);
-    doc.text('Signature du Consultant', 18, y + 7);
-    doc.text('Validation CDG Capital', 114, y + 7);
+    doc.text('Responsable', 40, y, { align: 'center' });
+    doc.text('Consultant', 160, y, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(0);
+    doc.text(String(ra.consultantNom || ''), 160, y + 5, { align: 'center' });
+
+    if (ra.signatureResponsable) {
+        try { doc.addImage(ra.signatureResponsable, 'PNG', 20, y + 8, 40, 18); } catch (e) { /* signature illisible */ }
+    }
+    if (ra.signatureConsultant) {
+        try { doc.addImage(ra.signatureConsultant, 'PNG', 140, y + 8, 40, 18); } catch (e) { /* signature illisible */ }
+    }
 
     // ---------- PIED DE PAGE ----------
     const pageCount = doc.internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
+        doc.setFont('helvetica', 'normal');
         doc.setFontSize(8);
         doc.setTextColor(150);
         doc.text(`ConsultTrack · Rapport d'Activité généré le ${new Date().toLocaleString()} · Page ${i}/${pageCount}`, 105, 290, { align: 'center' });
     }
 
     const safe = (s) => (s || '').replace(/\s+/g, '_');
-    doc.save(`RA_${safe(ra.referenceBC)}_${safe(ra.moisLabel)}.pdf`);
+    doc.save(`RA_${safe(ra.consultantNom)}_${safe(ra.moisLabel)}.pdf`);
 };

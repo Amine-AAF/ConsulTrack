@@ -17,8 +17,9 @@ const Login = () => {
         const result = await login(email, password);
 
         if (result.success) {
-            // Redirection intelligente selon le rôle
+            // Redirection selon le rôle
             if (result.role === 'ADMIN') navigate('/admin');
+            else if (result.role === 'RESPONSABLE') navigate('/validation');
             else navigate('/timesheet');
         } else {
             setError(result.message);
