@@ -1,5 +1,6 @@
 package ma.cdgcapital.consulttrack.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
 
@@ -16,17 +17,14 @@ public class Consultant {
     @Column(unique = true)
     private String email;
 
-    private String password; // À encoder en BCrypt
+    /** Hash BCrypt — jamais exposé en sortie via DTO. */
+    @JsonIgnore
+    private String password;
 
     @Enumerated(EnumType.STRING)
-    private Role role; // ADMIN ou CONSULTANT
+    private Role role;
 
     @ManyToOne
     @JoinColumn(name = "cabinet_id")
     private Cabinet cabinet;
-}
-
-// Enumération des rôles
-enum Role {
-    ADMIN, CONSULTANT
 }

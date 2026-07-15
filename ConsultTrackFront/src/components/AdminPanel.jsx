@@ -215,13 +215,25 @@ const TimesheetSection = ({ pendingItems, validatedItems, allBcs, cabinets, cons
     const handleAction = async (groupId, action) => {
         const group = pendingGroups.find(g => g.id === groupId);
         if(!group) return;
-        if (!window.confirm(`Confirmer : ${action.toUpperCase()} ?`)) return;
+
         try {
-            await Promise.all(group.entries.map(item =>
-                action === 'valider' ? api.put(`/admin/saisies/${item.id}/valider`) : api.put(`/admin/saisies/${item.id}/rejeter?motif=RejetGlobal`)
-            ));
+            if (action === 'valider') {
+                if (!window.confirm(`Valider tout le mois ${group.period} pour ${group.consultantName} ?`)) return;
+                // Endpoint atomique : 1 seul appel transactionnel côté back
+                const [year, month] = group.period.split('-');
+                await api.put(`/admin/saisies/valider-mois?consultantId=${group.consultantId}&annee=${year}&mois=${parseInt(month, 10)}`);
+            } else {
+                const motif = window.prompt(`Motif du rejet pour ${group.consultantName} (${group.period}) :`, '');
+                if (motif === null || motif.trim() === '') return; // annulé
+                await Promise.all(group.entries.map(item =>
+                    api.put(`/admin/saisies/${item.id}/rejeter?motif=${encodeURIComponent(motif)}`)
+                ));
+            }
             onRefresh();
-        } catch (err) { alert("Erreur opération"); }
+        } catch (err) {
+            const msg = err.response?.data?.message || "Erreur opération";
+            alert(msg);
+        }
     };
 
     return (

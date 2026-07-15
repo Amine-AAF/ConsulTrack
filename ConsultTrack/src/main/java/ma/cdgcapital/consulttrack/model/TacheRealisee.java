@@ -50,4 +50,7 @@ public class TacheRealisee {
 
     // --- AJOUT OBLIGATOIRE ---
     private String modeSaisie;
+
+    // Motif de rejet (au lieu de polluer descriptionTache)
+    private String motifRejet;
 }

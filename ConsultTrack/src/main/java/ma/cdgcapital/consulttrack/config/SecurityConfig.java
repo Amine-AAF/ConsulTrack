@@ -1,5 +1,6 @@
 package ma.cdgcapital.consulttrack.config;
 
+import ma.cdgcapital.consulttrack.security.JwtAuthFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -8,75 +9,42 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {
 
+    private final JwtAuthFilter jwtAuthFilter;
+
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
+        this.jwtAuthFilter = jwtAuthFilter;
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
-
-                // --- MODIFICATION POUR LE DÉVELOPPEMENT ---
-                // On autorise tout temporairement pour éviter l'erreur 401 Unauthorized
-                // tant que le frontend n'envoie pas de jeton JWT valide.
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .anyRequest().permitAll()
-                )
-
-                // On laisse la configuration du Resource Server,
-                // mais elle ne bloquera pas les requêtes grâce au permitAll() ci-dessus.
-                .oauth2ResourceServer(oauth2 -> oauth2
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
-                )
-
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+                        // Endpoints publics
+                        .requestMatchers("/api/auth/**", "/api/public/**").permitAll()
+                        // Admin réservé
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // Le reste authentifié
+                        .anyRequest().authenticated())
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
-    }
-
-    /**
-     * Définition du JwtDecoder.
-     * Assurez-vous que Keycloak est bien lancé sur le port 8080.
-     */
-    @Bean
-    public JwtDecoder jwtDecoder() {
-        String jwkSetUri = "http://localhost:8080/realms/consulttrack-realm/protocol/openid-connect/certs";
-        return NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
-    }
-
-    /**
-     * Convertit les rôles Keycloak en autorités Spring Security (ROLE_ADMIN, ROLE_CONSULTANT)
-     */
-    @Bean
-    public JwtAuthenticationConverter jwtAuthenticationConverter() {
-        final String REALM_ACCESS = "realm_access";
-        final String ROLES = "roles";
-
-        JwtAuthenticationConverter jwtConverter = new JwtAuthenticationConverter();
-        jwtConverter.setJwtGrantedAuthoritiesConverter(jwt -> {
-            Map<String, Collection<String>> realmAccess = jwt.getClaim(REALM_ACCESS);
-            if (realmAccess == null || !realmAccess.containsKey(ROLES)) {
-                return List.of();
-            }
-            Collection<String> roles = realmAccess.get(ROLES);
-            return roles.stream()
-                    .map(role -> new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
-                    .collect(Collectors.toList());
-        });
-        return jwtConverter;
     }
 }

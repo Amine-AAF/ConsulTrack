@@ -12,7 +12,13 @@ public class BonDeCommande {
 
     private String reference;
     private Double joursMax;
+
+    // Jours dont la saisie est validée définitivement (statut VALIDE)
     private Double joursConsommes = 0.0;
+
+    // Jours engagés = saisies en attente OU validées (statut EN_ATTENTE + VALIDE)
+    @Column(name = "jours_engages")
+    private Double joursEngages = 0.0;
 
     @Enumerated(EnumType.STRING)
     private StatutBC statut;

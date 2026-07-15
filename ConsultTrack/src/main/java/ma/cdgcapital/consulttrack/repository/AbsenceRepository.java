@@ -14,4 +14,12 @@ public interface AbsenceRepository extends JpaRepository<Absence, Long> {
 
     // Utilisé par DashboardService pour vérifier si une absence VALIDÉE existe
     boolean existsByConsultantIdAndDateAndStatut(Long consultantId, LocalDate date, StatutPointage statut);
+
+    List<Absence> findByStatut(StatutPointage statut);
+
+    List<Absence> findByStatutIn(List<StatutPointage> statuts);
+
+    List<Absence> findByConsultantIdAndDateBetweenAndStatut(Long consultantId,
+                                                            LocalDate start, LocalDate end,
+                                                            StatutPointage statut);
 }

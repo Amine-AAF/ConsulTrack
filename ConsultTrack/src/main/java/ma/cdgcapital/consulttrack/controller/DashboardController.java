@@ -3,6 +3,7 @@ package ma.cdgcapital.consulttrack.controller;
 import ma.cdgcapital.consulttrack.dto.*;
 import ma.cdgcapital.consulttrack.model.*;
 import ma.cdgcapital.consulttrack.service.DashboardService;
+import ma.cdgcapital.consulttrack.service.mapper.EntityMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -13,7 +14,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "http://localhost:5173")
 public class DashboardController {
 
     @Autowired
@@ -31,11 +31,12 @@ public class DashboardController {
     }
 
     @GetMapping("/dashboard/timesheet/{consultantId}")
-    public ResponseEntity<List<TacheRealisee>> getTimesheet(
+    public ResponseEntity<List<TacheRealiseeDTO>> getTimesheet(
             @PathVariable Long consultantId,
             @RequestParam int annee,
             @RequestParam int mois) {
-        return ResponseEntity.ok(dashboardService.getPointagesMensuels(consultantId, annee, mois));
+        return ResponseEntity.ok(dashboardService.getPointagesMensuels(consultantId, annee, mois)
+                .stream().map(EntityMapper::toDto).toList());
     }
 
     // ==========================================
@@ -61,41 +62,45 @@ public class DashboardController {
 
     // --- CABINETS ---
     @GetMapping("/admin/cabinets")
-    public ResponseEntity<List<Cabinet>> getAllCabinets() {
-        return ResponseEntity.ok(dashboardService.getAllCabinets());
+    public ResponseEntity<List<CabinetDTO>> getAllCabinets() {
+        return ResponseEntity.ok(dashboardService.getAllCabinets()
+                .stream().map(EntityMapper::toDto).toList());
     }
 
     @PostMapping("/admin/cabinets")
-    public ResponseEntity<Cabinet> createCabinet(@RequestBody Cabinet cabinet) {
-        return ResponseEntity.ok(dashboardService.saveCabinet(cabinet));
+    public ResponseEntity<CabinetDTO> createCabinet(@RequestBody Cabinet cabinet) {
+        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.saveCabinet(cabinet)));
     }
 
     // --- CONSULTANTS ---
     @GetMapping("/admin/consultants")
-    public ResponseEntity<List<Consultant>> getAllConsultants() {
-        return ResponseEntity.ok(dashboardService.getAllConsultants());
+    public ResponseEntity<List<ConsultantDTO>> getAllConsultants() {
+        return ResponseEntity.ok(dashboardService.getAllConsultants()
+                .stream().map(EntityMapper::toDto).toList());
     }
 
     @PostMapping("/admin/consultants")
-    public ResponseEntity<Consultant> createConsultant(@RequestBody Consultant consultant) {
-        return ResponseEntity.ok(dashboardService.saveConsultant(consultant));
+    public ResponseEntity<ConsultantDTO> createConsultant(@RequestBody Consultant consultant) {
+        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.saveConsultant(consultant)));
     }
 
     // --- BONS DE COMMANDE (BC) ---
     @GetMapping("/admin/bcs")
-    public ResponseEntity<List<BonDeCommande>> getAllBCs() {
-        return ResponseEntity.ok(dashboardService.getAllBCs());
+    public ResponseEntity<List<BonDeCommandeDTO>> getAllBCs() {
+        return ResponseEntity.ok(dashboardService.getAllBCs()
+                .stream().map(EntityMapper::toDto).toList());
     }
 
     @PostMapping("/admin/bcs")
-    public ResponseEntity<BonDeCommande> createBC(@RequestBody BonDeCommande bc) {
-        return ResponseEntity.ok(dashboardService.saveBC(bc));
+    public ResponseEntity<BonDeCommandeDTO> createBC(@RequestBody BonDeCommande bc) {
+        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.saveBC(bc)));
     }
 
     // --- VALIDATION DES SAISIES (Admin) ---
     @GetMapping("/admin/saisies/en-attente")
-    public ResponseEntity<List<TacheRealisee>> getPendingSaisies() {
-        return ResponseEntity.ok(dashboardService.getPendingSaisies());
+    public ResponseEntity<List<TacheRealiseeDTO>> getPendingSaisies() {
+        return ResponseEntity.ok(dashboardService.getPendingSaisies()
+                .stream().map(EntityMapper::toDto).toList());
     }
 
     @PutMapping("/admin/saisies/{id}/valider")
@@ -110,37 +115,49 @@ public class DashboardController {
         return ResponseEntity.ok().build();
     }
 
+    @PutMapping("/admin/saisies/valider-mois")
+    public ResponseEntity<Map<String, Object>> validerMois(
+            @RequestParam Long consultantId,
+            @RequestParam int annee,
+            @RequestParam int mois) {
+        int n = dashboardService.validerMois(consultantId, annee, mois);
+        return ResponseEntity.ok(Map.of(
+                "validated", n,
+                "consultantId", consultantId,
+                "annee", annee,
+                "mois", mois));
+    }
+
     // ==========================================
     // 4. GESTION DES ABSENCES (CONGÉS)
     // ==========================================
 
     @GetMapping("/dashboard/absences/{consultantId}")
-    public ResponseEntity<List<Absence>> getAbsences(
+    public ResponseEntity<List<AbsenceDTO>> getAbsences(
             @PathVariable Long consultantId,
             @RequestParam int annee,
             @RequestParam int mois) {
-        return ResponseEntity.ok(dashboardService.getAbsencesMensuelles(consultantId, annee, mois));
+        return ResponseEntity.ok(dashboardService.getAbsencesMensuelles(consultantId, annee, mois)
+                .stream().map(EntityMapper::toDto).toList());
     }
 
     @PostMapping("/dashboard/absences/demande")
-    public ResponseEntity<Absence> soumettreDemande(@RequestBody Map<String, Object> payload) {
-        Long consultantId = Long.valueOf(payload.get("consultantId").toString());
-        LocalDate date = LocalDate.parse(payload.get("date").toString());
-        String motif = payload.get("motif").toString();
-
-        return ResponseEntity.ok(dashboardService.demanderAbsence(consultantId, date, motif));
+    public ResponseEntity<AbsenceDTO> soumettreDemande(@RequestBody AbsenceDemandeRequest req) {
+        return ResponseEntity.ok(EntityMapper.toDto(
+                dashboardService.demanderAbsence(req.getConsultantId(), req.getDate(), req.getMotif())));
     }
 
     @GetMapping("/admin/absences/pending")
-    public ResponseEntity<List<Absence>> getPendingAbsences() {
-        return ResponseEntity.ok(dashboardService.getPendingAbsences());
+    public ResponseEntity<List<AbsenceDTO>> getPendingAbsences() {
+        return ResponseEntity.ok(dashboardService.getPendingAbsences()
+                .stream().map(EntityMapper::toDto).toList());
     }
 
     @PutMapping("/admin/absences/{id}/status")
     public ResponseEntity<Void> updateAbsenceStatus(
             @PathVariable Long id,
-            @RequestBody Map<String, String> payload) {
-        StatutPointage statut = StatutPointage.valueOf(payload.get("statut"));
+            @RequestBody AbsenceStatusRequest req) {
+        StatutPointage statut = StatutPointage.valueOf(req.getStatut());
         dashboardService.updateAbsenceStatus(id, statut);
         return ResponseEntity.ok().build();
     }
@@ -148,11 +165,12 @@ public class DashboardController {
     // --- SECTION HISTORIQUE & ACTIVITÉS ---
 
     @GetMapping("/admin/activities/search")
-    public ResponseEntity<List<TacheRealisee>> searchActivities(
+    public ResponseEntity<List<TacheRealiseeDTO>> searchActivities(
             @RequestParam int annee,
             @RequestParam(required = false) Integer mois,
             @RequestParam(required = false) Long consultantId) {
-        return ResponseEntity.ok(dashboardService.rechercherActivites(annee, mois, consultantId));
+        return ResponseEntity.ok(dashboardService.rechercherActivites(annee, mois, consultantId)
+                .stream().map(EntityMapper::toDto).toList());
     }
 
     @GetMapping("/timesheet/status")
@@ -166,12 +184,14 @@ public class DashboardController {
 
     // --- CORRECTION ICI : Ajout du préfixe /admin pour matcher le Frontend ---
     @GetMapping("/admin/saisies/validees")
-    public ResponseEntity<List<TacheRealisee>> getValidatedSaisies() {
-        return ResponseEntity.ok(dashboardService.getValidatedSaisies());
+    public ResponseEntity<List<TacheRealiseeDTO>> getValidatedSaisies() {
+        return ResponseEntity.ok(dashboardService.getValidatedSaisies()
+                .stream().map(EntityMapper::toDto).toList());
     }
 
     @GetMapping("/admin/absences/history")
-    public ResponseEntity<List<Absence>> getAbsenceHistory() {
-        return ResponseEntity.ok(dashboardService.getHistoriqueAbsences());
+    public ResponseEntity<List<AbsenceDTO>> getAbsenceHistory() {
+        return ResponseEntity.ok(dashboardService.getHistoriqueAbsences()
+                .stream().map(EntityMapper::toDto).toList());
     }
 }

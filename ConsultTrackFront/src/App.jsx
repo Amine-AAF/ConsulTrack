@@ -1,13 +1,17 @@
-import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
+import React from 'react';
+import { Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 
-// --- IMPORT DES COMPOSANTS ---
-import Dashboard from './components/Dashboard'; // Assurez-vous d'avoir ce composant ou créez un placeholder
+import Dashboard from './components/Dashboard';
 import TimesheetForm from './components/TimesheetForm';
 import AdminPanel from './components/AdminPanel';
-import AbsenceForm from './components/AbsenceForm'; // Assurez-vous d'avoir ce composant ou créez un placeholder
+import AbsenceForm from './components/AbsenceForm';
+import Rpi from './components/Rpi';
+import RapportActivite from './components/RapportActivite';
+import RapportActiviteValidation from './components/RapportActiviteValidation';
+import PrivateRoute from './components/PrivateRoute';
+import Login from './pages/Login';
+import { useAuth } from './context/AuthContext';
 
-// --- IMPORT DES ASSETS ---
 import logoConsultrack from './assets/logo_consultrack.png';
 
 import {
@@ -17,10 +21,11 @@ import {
     ShieldCheck,
     Coffee,
     Users,
+    FileText,
+    ClipboardList,
     ChevronRight
 } from 'lucide-react';
 
-// Composant NavLink personnalisé pour gérer l'état actif (surbrillance)
 const NavLink = ({ to, children, active }) => {
     const activeClass = active
         ? 'bg-[#008858] text-white shadow-lg shadow-[#008858]/20'
@@ -34,15 +39,25 @@ const NavLink = ({ to, children, active }) => {
 };
 
 const App = () => {
-    // --- ÉTAT GLOBAL (Simule le contexte d'authentification) ---
-    // Dans une vraie app, cela viendrait de votre AuthContext
-    const [userRole, setUserRole] = useState('ADMIN');
-    const currentUserId = 1; // ID simulé (ex: Ahmed Amine)
+    const { user, logout } = useAuth();
 
-    // --- STYLES INLINE (Pour la structure principale) ---
+    // Si pas connecté → uniquement les routes publiques
+    if (!user) {
+        return (
+            <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+        );
+    }
+
+    const userRole = user.role;
+    const currentUserId = user.id;
+    const userInitials = ((user.prenom?.[0] || '') + (user.nom?.[0] || '')).toUpperCase() || 'U';
+
     const sidebarStyle = {
         width: '18rem',
-        backgroundColor: '#003366', // Bleu CDG
+        backgroundColor: '#003366',
         color: 'white',
         position: 'fixed',
         height: '100vh',
@@ -65,7 +80,7 @@ const App = () => {
 
     const sectionTitleStyle = {
         fontSize: '11px',
-        color: '#008858', // Vert CDG
+        color: '#008858',
         fontWeight: '900',
         marginLeft: '12px',
         textTransform: 'uppercase',
@@ -76,137 +91,110 @@ const App = () => {
     };
 
     return (
-        <Router>
-            <div className="flex min-h-screen">
-
-                {/* ================= SIDEBAR (MENU GAUCHE) ================= */}
-                <aside style={sidebarStyle}>
-
-                    {/* --- ZONE LOGO --- */}
-                    <div className="mb-10 px-2 flex flex-col items-center">
-                        <div className="bg-white p-2 rounded-xl shadow-lg mb-3 w-full flex justify-center">
-                            <img
-                                src={logoConsultrack}
-                                alt="ConsulTrack Logo"
-                                style={{
-                                    height: '50px',
-                                    width: 'auto',
-                                    objectFit: 'contain'
-                                }}
-                            />
-                        </div>
-                        <p style={{
-                            fontSize: '10px',
-                            textTransform: 'uppercase',
-                            color: '#008858',
-                            fontWeight: 'bold',
-                            letterSpacing: '2px',
-                            margin: 0,
-                            opacity: 0.9,
-                            textAlign: 'center'
-                        }}>
-                            CDG CAPITAL
-                        </p>
+        <div className="flex min-h-screen">
+            <aside style={sidebarStyle}>
+                <div className="mb-10 px-2 flex flex-col items-center">
+                    <div className="bg-white p-2 rounded-xl shadow-lg mb-3 w-full flex justify-center">
+                        <img
+                            src={logoConsultrack}
+                            alt="ConsulTrack Logo"
+                            style={{ height: '50px', width: 'auto', objectFit: 'contain' }}
+                        />
                     </div>
+                    <p style={{
+                        fontSize: '10px',
+                        textTransform: 'uppercase',
+                        color: '#008858',
+                        fontWeight: 'bold',
+                        letterSpacing: '2px',
+                        margin: 0,
+                        opacity: 0.9,
+                        textAlign: 'center'
+                    }}>
+                        CDG CAPITAL
+                    </p>
+                </div>
 
-                    {/* --- NAVIGATION --- */}
-                    <nav className="flex-1">
-                        {/* On passe userRole pour afficher le bon menu */}
-                        <NavigationContent userRole={userRole} sectionTitleStyle={sectionTitleStyle} />
-                    </nav>
+                <nav className="flex-1">
+                    <NavigationContent userRole={userRole} sectionTitleStyle={sectionTitleStyle} />
+                </nav>
 
-                    {/* --- BOUTON DÉCONNEXION --- */}
-                    <button className="flex items-center gap-3 p-4 text-red-300 hover:text-red-100 hover:bg-red-500/10 rounded-xl transition-all mt-auto border-t border-white/10 font-black uppercase text-[10px] bg-transparent border-none cursor-pointer tracking-widest">
-                        <LogOut size={18} /> Déconnexion
-                    </button>
-                </aside>
+                <button
+                    onClick={logout}
+                    className="flex items-center gap-3 p-4 text-red-300 hover:text-red-100 hover:bg-red-500/10 rounded-xl transition-all mt-auto border-t border-white/10 font-black uppercase text-[10px] bg-transparent border-none cursor-pointer tracking-widest"
+                >
+                    <LogOut size={18} /> Déconnexion
+                </button>
+            </aside>
 
-                {/* ================= MAIN CONTENT (CONTENU DROITE) ================= */}
-                <main style={mainStyle}>
-                    <div className="max-w-7xl mx-auto w-full">
+            <main style={mainStyle}>
+                <div className="max-w-7xl mx-auto w-full">
+                    <header className="mb-10 flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <div className="flex flex-col">
+                            <h2 style={{ fontSize: '1.25rem', fontWeight: '900', color: '#003366', textTransform: 'uppercase', margin: 0, letterSpacing: '-0.02em' }}>
+                                {userRole === 'ADMIN' ? 'Supervision Prestataires' : 'Mon Espace Consultant'}
+                            </h2>
+                        </div>
 
-                        {/* --- HEADER SUPERIEUR --- */}
-                        <header className="mb-10 flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                            <div className="flex flex-col">
-                                <h2 style={{ fontSize: '1.25rem', fontWeight: '900', color: '#003366', textTransform: 'uppercase', margin: 0, letterSpacing: '-0.02em' }}>
-                                    {userRole === 'ADMIN' ? 'Supervision Prestataires' : 'Mon Espace Consultant'}
-                                </h2>
-                            </div>
-
-                            <div className="flex items-center gap-5">
-                                {/* SWITCH ROLE (POUR TESTER RAPIDEMENT) */}
-                                <div className="flex items-center gap-2 p-1 bg-gray-100 rounded-xl border border-gray-200">
-                                    <button
-                                        onClick={() => setUserRole('CONSULTANT')}
-                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${userRole === 'CONSULTANT' ? 'bg-white shadow-sm text-[#003366]' : 'text-gray-400'}`}
-                                    >CONSULTANT</button>
-                                    <button
-                                        onClick={() => setUserRole('ADMIN')}
-                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${userRole === 'ADMIN' ? 'bg-white shadow-sm text-[#003366]' : 'text-gray-400'}`}
-                                    >ADMIN</button>
+                        <div className="flex items-center gap-4 border-l pl-5 border-gray-200">
+                            <div className="text-right">
+                                <div style={{ fontWeight: '900', color: '#003366', fontSize: '14px' }}>
+                                    {user.prenom} {user.nom}
                                 </div>
-
-                                {/* PROFIL UTILISATEUR */}
-                                <div className="flex items-center gap-4 border-l pl-5 border-gray-200">
-                                    <div className="text-right">
-                                        <div style={{ fontWeight: '900', color: '#003366', fontSize: '14px' }}>Ahmed Amine</div>
-                                        <div style={{ fontSize: '10px', color: '#008858', fontWeight: 'bold', textTransform: 'uppercase' }}>{userRole}</div>
-                                    </div>
-                                    <div style={{
-                                        width: '42px', height: '42px',
-                                        backgroundColor: '#003366',
-                                        borderRadius: '14px',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        color: '#008858',
-                                        fontWeight: '900', fontSize: '14px',
-                                        border: '2px solid #e5e7eb'
-                                    }}>
-                                        AA
-                                    </div>
+                                <div style={{ fontSize: '10px', color: '#008858', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                                    {userRole}
                                 </div>
                             </div>
-                        </header>
-
-                        {/* --- ROUTING & AFFICHAGE DES PAGES --- */}
-                        <div className="animate-in fade-in duration-500">
-                            <Routes>
-                                {/* Dashboard Général */}
-                                <Route path="/" element={<Dashboard userRole={userRole} userId={currentUserId} />} />
-
-                                {/* ROUTES CONSULTANT
-                                    Ici, on passe userId={currentUserId} pour que le formulaire sache charger
-                                    les données de CE consultant spécifique (Ahmed Amine).
-                                */}
-                                <Route path="/timesheet" element={<TimesheetForm userRole="CONSULTANT" userId={currentUserId} />} />
-                                <Route path="/absences" element={<AbsenceForm userRole="CONSULTANT" userId={currentUserId} />} />
-
-                                {/* ROUTES ADMIN
-                                    Ici, l'AdminPanel n'a pas besoin d'ID spécifique car il charge tout.
-                                    Le TimesheetForm en mode ADMIN affichera la liste déroulante des consultants.
-                                */}
-                                <Route path="/admin" element={userRole === 'ADMIN' ? <AdminPanel /> : <Navigate to="/" />} />
-                                <Route path="/admin/timesheet-global" element={userRole === 'ADMIN' ? <TimesheetForm userRole="ADMIN" /> : <Navigate to="/" />} />
-                                <Route path="/admin/saisie-absence" element={userRole === 'ADMIN' ? <AbsenceForm userRole="ADMIN" /> : <Navigate to="/" />} />
-
-                                {/* Fallback */}
-                                <Route path="*" element={<Navigate to="/" />} />
-                            </Routes>
+                            <div style={{
+                                width: '42px', height: '42px',
+                                backgroundColor: '#003366',
+                                borderRadius: '14px',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                color: '#008858',
+                                fontWeight: '900', fontSize: '14px',
+                                border: '2px solid #e5e7eb'
+                            }}>
+                                {userInitials}
+                            </div>
                         </div>
+                    </header>
+
+                    <div className="animate-in fade-in duration-500">
+                        <Routes>
+                            <Route path="/login" element={<Navigate to="/" replace />} />
+
+                            <Route path="/" element={<Dashboard userRole={userRole} userId={currentUserId} />} />
+
+                            {/* Routes consultant */}
+                            <Route element={<PrivateRoute allowedRoles={['CONSULTANT', 'ADMIN']} />}>
+                                <Route path="/timesheet" element={<TimesheetForm userRole={userRole} userId={currentUserId} />} />
+                                <Route path="/absences" element={<AbsenceForm userRole={userRole} userId={currentUserId} />} />
+                                <Route path="/rpi" element={<Rpi userRole={userRole} userId={currentUserId} />} />
+                                <Route path="/rapport-activite" element={<RapportActivite userRole={userRole} userId={currentUserId} />} />
+                            </Route>
+
+                            {/* Routes admin uniquement */}
+                            <Route element={<PrivateRoute allowedRoles={['ADMIN']} />}>
+                                <Route path="/admin" element={<AdminPanel />} />
+                                <Route path="/admin/rapports-validation" element={<RapportActiviteValidation />} />
+                                <Route path="/admin/timesheet-global" element={<TimesheetForm userRole="ADMIN" />} />
+                                <Route path="/admin/saisie-absence" element={<AbsenceForm userRole="ADMIN" />} />
+                            </Route>
+
+                            <Route path="*" element={<Navigate to="/" replace />} />
+                        </Routes>
                     </div>
-                </main>
-            </div>
-        </Router>
+                </div>
+            </main>
+        </div>
     );
 };
 
-// --- SOUS-COMPOSANT NAVIGATION ---
-// Gère l'affichage des liens selon le rôle
 const NavigationContent = ({ userRole, sectionTitleStyle }) => {
-    const location = useLocation(); // Hook pour savoir sur quelle page on est
+    const location = useLocation();
 
     return (
         <>
-            {/* TOUS LES RÔLES */}
             <div style={sectionTitleStyle}>Général</div>
             <NavLink to="/" active={location.pathname === '/'}>
                 <div className="flex items-center gap-3">
@@ -215,7 +203,6 @@ const NavigationContent = ({ userRole, sectionTitleStyle }) => {
                 </div>
             </NavLink>
 
-            {/* MENU CONSULTANT */}
             {userRole === 'CONSULTANT' && (
                 <>
                     <div style={sectionTitleStyle}>Ma Mission</div>
@@ -232,10 +219,21 @@ const NavigationContent = ({ userRole, sectionTitleStyle }) => {
                             <span>Mes Absences</span>
                         </div>
                     </NavLink>
+                    <NavLink to="/rpi" active={location.pathname === '/rpi'}>
+                        <div className="flex items-center gap-3">
+                            <FileText size={18} />
+                            <span>Mes RPI</span>
+                        </div>
+                    </NavLink>
+                    <NavLink to="/rapport-activite" active={location.pathname === '/rapport-activite'}>
+                        <div className="flex items-center gap-3">
+                            <ClipboardList size={18} />
+                            <span>Mon Rapport d'Activité</span>
+                        </div>
+                    </NavLink>
                 </>
             )}
 
-            {/* MENU ADMIN */}
             {userRole === 'ADMIN' && (
                 <>
                     <div style={sectionTitleStyle}>Supervision</div>
@@ -245,6 +243,24 @@ const NavigationContent = ({ userRole, sectionTitleStyle }) => {
                             <span>Console Admin</span>
                         </div>
                         <ChevronRight size={14} className="opacity-50" />
+                    </NavLink>
+                    <NavLink to="/rpi" active={location.pathname === '/rpi'}>
+                        <div className="flex items-center gap-3">
+                            <FileText size={18} />
+                            <span>RPI Consultants</span>
+                        </div>
+                    </NavLink>
+                    <NavLink to="/rapport-activite" active={location.pathname === '/rapport-activite'}>
+                        <div className="flex items-center gap-3">
+                            <ClipboardList size={18} />
+                            <span>Rapports d'Activité</span>
+                        </div>
+                    </NavLink>
+                    <NavLink to="/admin/rapports-validation" active={location.pathname === '/admin/rapports-validation'}>
+                        <div className="flex items-center gap-3">
+                            <ClipboardList size={18} />
+                            <span>Valider les RA</span>
+                        </div>
                     </NavLink>
 
                     <div style={sectionTitleStyle}>Saisie Déléguée</div>

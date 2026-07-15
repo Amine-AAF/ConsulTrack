@@ -69,3 +69,8 @@ logs/
 
 # Wrapper Maven (Optionnel : généralement on LE GARDE, mais si tu veux l'exclure :)
 # !.mvn/wrapper/maven-wrapper.jar
+# ========================
+# ÉCHANTILLONS / DONNÉES SOURCES (volumineux, non versionnés)
+# ========================
+samples/
+Samples/
