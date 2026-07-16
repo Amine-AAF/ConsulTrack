@@ -1,5 +1,6 @@
 package ma.cdgcapital.consulttrack.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
 
@@ -26,4 +27,9 @@ public class Cabinet {
     @Lob
     @Column(columnDefinition = "TEXT")
     private String logoBase64;
+
+    /** Logo du cabinet (data-URL base64) imprimé sur les RPI / Rapports d'Activité. */
+    @JsonIgnore
+    @Column(columnDefinition = "TEXT")
+    private String logoImage;
 }

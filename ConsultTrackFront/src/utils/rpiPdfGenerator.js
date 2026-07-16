@@ -13,6 +13,13 @@ const dayNum = (dateStr) => (dateStr ? String(parseInt(dateStr.slice(8, 10), 10)
 
 const DAY_LABELS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 
+/** Format jsPDF déduit d'une data-URL image (PNG par défaut). */
+export const imageFormatFromDataUrl = (dataUrl) => {
+    const m = /^data:image\/(\w+)/.exec(dataUrl || '');
+    const fmtImg = (m ? m[1] : 'png').toUpperCase();
+    return fmtImg === 'JPG' ? 'JPEG' : fmtImg;
+};
+
 /** Contenu d'une case jour du tableau hebdomadaire. */
 const celluleJour = (jour) => {
     if (!jour) return '';
@@ -35,6 +42,13 @@ export const generateRpiPDF = (rpi) => {
         if (yy > limit) { doc.addPage(); return 20; }
         return yy;
     };
+
+    // ---------- LOGO CABINET (coin supérieur gauche) ----------
+    if (rpi.logoCabinet) {
+        try {
+            doc.addImage(rpi.logoCabinet, imageFormatFromDataUrl(rpi.logoCabinet), 14, 8, 24, 14);
+        } catch (e) { /* logo illisible : on imprime sans */ }
+    }
 
     // ---------- TITRE ----------
     doc.setFont('helvetica', 'bold');

@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf';
+import { imageFormatFromDataUrl } from './rpiPdfGenerator';
 
 /* ================================================================
    Rapport d'Activité — format pilote (Jamoure 2026).
@@ -64,6 +65,14 @@ export const generateRaPDF = (ra) => {
         doc.setLineWidth(0.4);
         doc.line(x, y + 1, x + w, y + 1);
     };
+
+    // ---------- LOGO CABINET (coin supérieur gauche) ----------
+    if (ra.logoCabinet) {
+        try {
+            doc.addImage(ra.logoCabinet, imageFormatFromDataUrl(ra.logoCabinet), MARGIN_L, 6, 24, 14);
+            y = Math.max(y, 26); // le bloc titre passe sous le logo si nécessaire
+        } catch (e) { /* logo illisible : on imprime sans */ }
+    }
 
     // ---------- TITRE : centré, gras, souligné ----------
     doc.setFont('helvetica', 'bold');

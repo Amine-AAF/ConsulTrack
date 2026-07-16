@@ -7,6 +7,7 @@ import AdminPanel from './components/AdminPanel';
 import AbsenceForm from './components/AbsenceForm';
 import Documents from './components/Documents';
 import ValidationHub from './components/ValidationHub';
+import Facturation from './components/Facturation';
 import Profile from './components/Profile';
 import PrivateRoute from './components/PrivateRoute';
 import Login from './pages/Login';
@@ -17,7 +18,7 @@ import logoConsultrack from './assets/logo_consultrack.png';
 
 import {
     LayoutDashboard, CalendarCheck, LogOut, ShieldCheck, Coffee,
-    Users, FileText, ClipboardCheck, UserCircle, ChevronRight
+    Users, FileText, ClipboardCheck, UserCircle, ChevronRight, Receipt
 } from 'lucide-react';
 
 const NavLink = ({ to, children, active, badge }) => {
@@ -150,6 +151,7 @@ const App = () => {
                             {/* Validation + référentiel (admin + responsable) */}
                             <Route element={<PrivateRoute allowedRoles={['ADMIN', 'RESPONSABLE']} />}>
                                 <Route path="/validation" element={<ValidationHub />} />
+                                <Route path="/facturation" element={<Facturation />} />
                                 <Route path="/admin" element={<AdminPanel userRole={userRole} />} />
                             </Route>
 
@@ -211,6 +213,11 @@ const Navigation = ({ userRole, sectionTitleStyle, pending }) => {
                     <NavLink to="/validation" active={is('/validation')} badge={pending?.total}>
                         <div className="flex items-center gap-3">
                             <ClipboardCheck size={18} /><span>À Valider</span>
+                        </div>
+                    </NavLink>
+                    <NavLink to="/facturation" active={is('/facturation')}>
+                        <div className="flex items-center gap-3">
+                            <Receipt size={18} /><span>Facturation</span>
                         </div>
                     </NavLink>
 

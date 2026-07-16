@@ -22,4 +22,7 @@ public class RapportActiviteDTO {
     private String motifRejet;
     private String signatureConsultant;
     private String signatureResponsable;
+
+    /** Logo du cabinet (data-URL base64) imprimé en tête du document, ou null. */
+    private String logoCabinet;
 }

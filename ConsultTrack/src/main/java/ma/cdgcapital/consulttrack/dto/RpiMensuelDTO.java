@@ -34,4 +34,7 @@ public class RpiMensuelDTO {
 
     private String signatureConsultant;  // base64 ou null (câblage ultérieur)
     private String signatureResponsable; // null pour l'instant
+
+    /** Logo du cabinet (data-URL base64) imprimé en tête du document, ou null. */
+    private String logoCabinet;
 }

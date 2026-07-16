@@ -67,6 +67,7 @@ public class ReportService {
             rpi.setConsultantNom(consultant.getNom() + " " + consultant.getPrenom());
             if (consultant.getCabinet() != null) {
                 rpi.setCabinetNom(consultant.getCabinet().getNom());
+                rpi.setLogoCabinet(consultant.getCabinet().getLogoImage());
             }
         }
         rpi.setMois(mois);

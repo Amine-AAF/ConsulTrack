@@ -91,6 +91,20 @@ public class DashboardController {
         return ResponseEntity.ok().build();
     }
 
+    /** Logo du cabinet (data-URL base64) — imprimé sur les RPI / RA. */
+    @GetMapping("/admin/cabinets/{id}/logo")
+    public ResponseEntity<Map<String, String>> getCabinetLogo(@PathVariable Long id) {
+        return ResponseEntity.ok(
+                java.util.Collections.singletonMap("logoImage", dashboardService.getCabinetLogo(id)));
+    }
+
+    @PutMapping("/admin/cabinets/{id}/logo")
+    public ResponseEntity<Void> updateCabinetLogo(@PathVariable Long id,
+                                                  @RequestBody Map<String, String> body) {
+        dashboardService.updateCabinetLogo(id, body.get("logoImage"));
+        return ResponseEntity.ok().build();
+    }
+
     @PutMapping("/admin/consultants/{id}")
     public ResponseEntity<ConsultantDTO> updateConsultant(@PathVariable Long id, @RequestBody Consultant consultant) {
         return ResponseEntity.ok(EntityMapper.toDto(dashboardService.updateConsultant(id, consultant)));

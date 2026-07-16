@@ -111,6 +111,7 @@ public class RapportActiviteService {
             dto.setConsultantNom(consultant.getNom() + " " + consultant.getPrenom());
             if (consultant.getCabinet() != null) {
                 dto.setCabinetNom(consultant.getCabinet().getNom());
+                dto.setLogoCabinet(consultant.getCabinet().getLogoImage());
             }
         }
         dto.setFonction(resolveFonction(consultantId));

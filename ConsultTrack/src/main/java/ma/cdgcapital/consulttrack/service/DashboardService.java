@@ -318,6 +318,31 @@ public class DashboardService {
         return cabinetRepository.save(c);
     }
 
+    /** Enregistre (ou efface si vide) le logo d'un cabinet — data-URL base64 image. */
+    @Transactional
+    public void updateCabinetLogo(Long id, String logoImage) {
+        Cabinet c = cabinetRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Cabinet introuvable: " + id));
+        if (logoImage == null || logoImage.isBlank()) {
+            c.setLogoImage(null);
+        } else {
+            if (!logoImage.startsWith("data:image/")) {
+                throw new BusinessException("Le logo doit être une image encodée en data-URL (data:image/...).");
+            }
+            if (logoImage.length() > 500_000) {
+                throw new BusinessException("Logo trop volumineux : 400 Ko maximum.");
+            }
+            c.setLogoImage(logoImage);
+        }
+        cabinetRepository.save(c);
+    }
+
+    public String getCabinetLogo(Long id) {
+        return cabinetRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Cabinet introuvable: " + id))
+                .getLogoImage();
+    }
+
     @Transactional
     public void deleteCabinet(Long id) {
         boolean utilise = consultantRepository.findAll().stream()

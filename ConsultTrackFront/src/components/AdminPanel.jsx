@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axiosConfig';
 import {
     Building2, Users, FileStack, ShieldCheck, Landmark,
     CalendarDays, Plus, Trash2, AlertCircle, KeyRound, Mail,
-    Pencil, X, Save,
+    Pencil, X, Save, Image as ImageIcon,
 } from 'lucide-react';
 import {
     PageHeader, Button, Tabs, Card, BudgetGauge, COLORS,
@@ -107,6 +107,62 @@ const AdminPanel = ({ userRole }) => {
 /* ==========================================
    1. CABINETS
    ========================================== */
+
+/** Logo du cabinet : aperçu + upload (image ≤ 400 Ko → data-URL → PUT). */
+const CabinetLogoCell = ({ cabinetId, onError }) => {
+    const [logo, setLogo] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const inputRef = useRef(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        api.get(`/admin/cabinets/${cabinetId}/logo`)
+            .then(r => { if (!cancelled) setLogo(r.data?.logoImage || null); })
+            .catch(() => { /* pas de logo / erreur silencieuse */ });
+        return () => { cancelled = true; };
+    }, [cabinetId]);
+
+    const onFile = (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        onError('');
+        if (!file.type || !file.type.startsWith('image/')) {
+            onError('Le logo doit être un fichier image (PNG, JPEG…).');
+            return;
+        }
+        if (file.size > 400 * 1024) {
+            onError('Logo trop volumineux : 400 Ko maximum.');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = async () => {
+            const dataUrl = reader.result;
+            setUploading(true);
+            try {
+                await api.put(`/admin/cabinets/${cabinetId}/logo`, { logoImage: dataUrl });
+                setLogo(dataUrl);
+            } catch (err) { onError(getErr(err)); }
+            setUploading(false);
+        };
+        reader.readAsDataURL(file);
+    };
+
+    return (
+        <div className="flex items-center gap-2">
+            {logo && (
+                <img src={logo} alt="Logo cabinet"
+                     className="h-8 w-14 object-contain rounded border border-gray-100 bg-white" />
+            )}
+            <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+            <Button variant="outline" disabled={uploading}
+                    onClick={() => inputRef.current && inputRef.current.click()}>
+                <ImageIcon size={14} /> {uploading ? 'Envoi…' : 'Logo'}
+            </Button>
+        </div>
+    );
+};
+
 const CabinetSection = ({ cabinets, onRefresh }) => {
     const emptyForm = { nom: '', adresse: '', ice: '', identifiantFiscal: '', patente: '', rib: '' };
     const [form, setForm] = useState(emptyForm);
@@ -199,12 +255,13 @@ const CabinetSection = ({ cabinets, onRefresh }) => {
                             <th className="p-3">IF</th>
                             <th className="p-3">Patente</th>
                             <th className="p-3">RIB</th>
+                            <th className="p-3">Logo</th>
                             <th className="p-3 text-right">Actions</th>
                         </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
                         {cabinets.length === 0 ? (
-                            <tr><td colSpan="7" className="p-6 text-center text-gray-400 italic">Aucun cabinet référencé.</td></tr>
+                            <tr><td colSpan="8" className="p-6 text-center text-gray-400 italic">Aucun cabinet référencé.</td></tr>
                         ) : cabinets.map(c => (
                             <tr key={c.id} className="hover:bg-gray-50">
                                 <td className="p-3 font-bold" style={{ color: COLORS.blue }}>{c.nom}</td>
@@ -213,6 +270,7 @@ const CabinetSection = ({ cabinets, onRefresh }) => {
                                 <td className="p-3 text-gray-500 font-mono">{c.identifiantFiscal || '—'}</td>
                                 <td className="p-3 text-gray-500 font-mono">{c.patente || '—'}</td>
                                 <td className="p-3 text-gray-500 font-mono">{c.rib || '—'}</td>
+                                <td className="p-3"><CabinetLogoCell cabinetId={c.id} onError={setError} /></td>
                                 <td className="p-3">
                                     <div className="flex justify-end gap-2">
                                         <Button variant="outline" onClick={() => startEdit(c)}>
