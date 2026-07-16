@@ -30,7 +30,11 @@ public class BonDeCommande {
     @Column(name = "montant_consomme")
     private Double montantConsomme = 0.0;
 
+    /** Code budgétaire : commence par R (RUN) ou P (PROJET) — la nature en est déduite. */
     private String codeBudget;
+
+    /** Année budgétaire de rattachement du BC. */
+    private Integer anneeBudgetaire;
     private String designation;
     private Double tjm;
 

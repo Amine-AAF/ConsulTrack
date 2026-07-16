@@ -25,7 +25,8 @@ public class BonDeCommandeDTO {
     private Double joursRestants;
     private Double montantConsomme;
     private String statut;
-    private String nature; // RUN | PROJET
+    private String nature; // RUN | PROJET (déduite du code budgétaire R…/P…)
+    private Integer anneeBudgetaire;
     private Long consultantId;
     private ConsultantRefDTO consultant;
 }

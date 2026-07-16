@@ -3,7 +3,7 @@ import api from '../api/axiosConfig';
 import * as XLSX from 'xlsx';
 import {
     LayoutDashboard, Users, Building2, Filter, Download,
-    AlertTriangle, RefreshCw, AlertCircle, Search,
+    AlertTriangle, RefreshCw, AlertCircle, Search, Wallet,
 } from 'lucide-react';
 import {
     PageHeader, StatCard, Card, BudgetGauge, Button, COLORS,
@@ -81,6 +81,7 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
     const [cabinets, setCabinets] = useState([]);  // pour filtre ADMIN
     const [filterCabinet, setFilterCabinet] = useState('');
     const [filterConsultant, setFilterConsultant] = useState('');
+    const [filterCode, setFilterCode] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
@@ -132,6 +133,9 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
         if (isAdmin && filterConsultant) {
             rows = rows.filter(r => r.nomConsultant === filterConsultant);
         }
+        if (isAdmin && filterCode) {
+            rows = rows.filter(r => r.descriptionCodeBudgetaire === filterCode);
+        }
         if (searchTerm) {
             const q = searchTerm.toLowerCase();
             rows = rows.filter(r =>
@@ -139,13 +143,28 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                 (r.referenceBC?.toLowerCase() || '').includes(q));
         }
         return rows;
-    }, [data, me, filterCabinet, filterConsultant, searchTerm, isResponsable, isAdmin]);
+    }, [data, me, filterCabinet, filterConsultant, filterCode, searchTerm, isResponsable, isAdmin]);
 
     // Options du filtre consultant (ADMIN) : noms dédupliqués issus du rapport
     const consultantOptions = useMemo(() =>
         [...new Set(data.map(r => r.nomConsultant).filter(Boolean))]
             .sort((a, b) => a.localeCompare(b)),
     [data]);
+
+    // Options du filtre code budgétaire (ADMIN) : codes dédupliqués issus du rapport
+    const codeOptions = useMemo(() =>
+        [...new Set(data.map(r => r.descriptionCodeBudgetaire).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b)),
+    [data]);
+
+    // Synthèse du budget sélectionné (ADMIN)
+    const budgetSummary = useMemo(() => {
+        if (!filterCode) return null;
+        return {
+            jh: scopedRows.reduce((s, r) => s + (r.joursConsommesYTD || 0), 0),
+            montant: scopedRows.reduce((s, r) => s + (r.montantConsommeYTD || 0), 0),
+        };
+    }, [filterCode, scopedRows]);
 
     // --- KPI ---
     const kpi = useMemo(() => {
@@ -277,8 +296,32 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                                     {consultantOptions.map(nom => <option key={nom} value={nom}>{nom}</option>)}
                                 </select>
                             </div>
+                            <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
+                                <Wallet size={16} style={{ color: COLORS.blue }} />
+                                <select
+                                    className="bg-transparent outline-none text-sm font-bold cursor-pointer"
+                                    style={{ color: COLORS.blue }}
+                                    value={filterCode}
+                                    onChange={e => setFilterCode(e.target.value)}
+                                >
+                                    <option value="">Tous les codes budgétaires</option>
+                                    {codeOptions.map(code => <option key={code} value={code}>{code}</option>)}
+                                </select>
+                            </div>
                         </>
                     )}
+                </div>
+            )}
+
+            {/* Synthèse du budget sélectionné (ADMIN) */}
+            {isAdmin && budgetSummary && (
+                <div className="flex items-center gap-2 mb-6 -mt-3 text-sm font-bold px-4 py-2.5 rounded-xl border"
+                     style={{ backgroundColor: '#eef4ff', borderColor: '#dbeafe', color: COLORS.blue }}>
+                    <Wallet size={15} />
+                    <span>
+                        Budget {filterCode} : {budgetSummary.jh.toLocaleString('fr-FR')} JH consommés
+                        {' · '}{budgetSummary.montant.toLocaleString('fr-FR')} MAD
+                    </span>
                 </div>
             )}
 

@@ -459,8 +459,38 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
 /* ==========================================
    3. BONS DE COMMANDE
    ========================================== */
+/** Nature dérivée du code budgétaire : R… → RUN, P… → PROJET, sinon null. */
+const natureFromCode = (code) => {
+    const first = (code || '').trim().charAt(0).toUpperCase();
+    if (first === 'R') return 'RUN';
+    if (first === 'P') return 'PROJET';
+    return null;
+};
+
+const NatureChip = ({ code }) => {
+    if (!(code || '').trim()) return null;
+    const nature = natureFromCode(code);
+    if (!nature) {
+        return (
+            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: '#fee2e2', color: COLORS.red }}>
+                Code invalide (R… ou P…)
+            </span>
+        );
+    }
+    return (
+        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full"
+              style={nature === 'RUN'
+                  ? { backgroundColor: '#e0e7ff', color: '#4338ca' }
+                  : { backgroundColor: '#dcfce7', color: '#15803d' }}>
+            {nature}
+        </span>
+    );
+};
+
 const BCSection = ({ bcs, consultants, onRefresh }) => {
-    const emptyForm = { reference: '', joursMax: '', tjm: '', codeBudget: '', designation: '', consultantId: '', nature: 'RUN' };
+    const currentYear = new Date().getFullYear();
+    const emptyForm = { reference: '', joursMax: '', tjm: '', codeBudget: '', anneeBudgetaire: String(currentYear), designation: '', consultantId: '' };
     const [form, setForm] = useState(emptyForm);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
@@ -471,6 +501,14 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
             setError('Référence, jours max et consultant sont obligatoires.');
             return;
         }
+        if (!form.codeBudget.trim()) {
+            setError('Le code budgétaire est obligatoire.');
+            return;
+        }
+        if (!natureFromCode(form.codeBudget)) {
+            setError('Code budgétaire invalide : il doit commencer par R (RUN) ou P (PROJET).');
+            return;
+        }
         setSaving(true);
         try {
             await api.post('/admin/bcs', {
@@ -478,9 +516,9 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
                 joursMax: parseFloat(form.joursMax),
                 tjm: form.tjm ? parseFloat(form.tjm) : null,
                 codeBudget: form.codeBudget,
+                anneeBudgetaire: form.anneeBudgetaire ? parseInt(form.anneeBudgetaire, 10) : null,
                 designation: form.designation,
                 consultantId: parseInt(form.consultantId, 10),
-                nature: form.nature,
             });
             setForm(emptyForm);
             onRefresh();
@@ -504,19 +542,19 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
                            onChange={e => setForm({ ...form, joursMax: e.target.value })} />
                     <input className={inputCls} type="number" min="0" placeholder="TJM (MAD)" value={form.tjm}
                            onChange={e => setForm({ ...form, tjm: e.target.value })} />
-                    <input className={inputCls} placeholder="Code budgétaire" value={form.codeBudget}
-                           onChange={e => setForm({ ...form, codeBudget: e.target.value })} />
+                    <div className="flex items-center gap-2">
+                        <input className={inputCls} required placeholder="Code budgétaire * (R-xxxx ou P-xxxx)" value={form.codeBudget}
+                               onChange={e => setForm({ ...form, codeBudget: e.target.value })} />
+                        <NatureChip code={form.codeBudget} />
+                    </div>
+                    <input className={inputCls} type="number" placeholder="Année budgétaire" value={form.anneeBudgetaire}
+                           onChange={e => setForm({ ...form, anneeBudgetaire: e.target.value })} />
                     <input className={inputCls} placeholder="Désignation" value={form.designation}
                            onChange={e => setForm({ ...form, designation: e.target.value })} />
                     <select className={inputCls} value={form.consultantId}
                             onChange={e => setForm({ ...form, consultantId: e.target.value })}>
                         <option value="">Consultant *</option>
                         {consultantsOnly.map(c => <option key={c.id} value={c.id}>{c.nom} {c.prenom}</option>)}
-                    </select>
-                    <select className={inputCls} value={form.nature}
-                            onChange={e => setForm({ ...form, nature: e.target.value })}>
-                        <option value="RUN">Nature : RUN</option>
-                        <option value="PROJET">Nature : PROJET</option>
                     </select>
                 </div>
                 <div className="mt-4">
@@ -550,7 +588,10 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
                                 </span>
                             )}
                         </div>
-                        <div className="text-xs text-gray-400 font-bold mb-1">{bc.codeBudget || '—'}</div>
+                        <div className="text-xs text-gray-400 font-bold mb-1">
+                            {bc.codeBudget || '—'}
+                            {bc.anneeBudgetaire ? ` · ${bc.anneeBudgetaire}` : ''}
+                        </div>
                         {bc.designation && <div className="text-xs text-gray-500 mb-2">{bc.designation}</div>}
                         <div className="text-sm font-bold mb-3" style={{ color: COLORS.gold }}>
                             {bc.consultant ? `${bc.consultant.nom} ${bc.consultant.prenom || ''}` : 'Non affecté'}

@@ -45,6 +45,7 @@ public final class EntityMapper {
                 bc.getMontantConsomme(),
                 bc.getStatut() != null ? bc.getStatut().name() : null,
                 bc.getNature() != null ? bc.getNature().name() : null,
+                bc.getAnneeBudgetaire(),
                 bc.getConsultant() != null ? bc.getConsultant().getId() : null,
                 toRef(bc.getConsultant()));
     }

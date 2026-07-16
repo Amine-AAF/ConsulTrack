@@ -76,11 +76,6 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
     const [absSelection, setAbsSelection] = useState([]); // dates ISO sélectionnées pour demande
     const [absMotif, setAbsMotif] = useState(MOTIFS_ABSENCE[0]);
 
-    // --- Description appliquée aux nouveaux jours à l'enregistrement ---
-    const [description, setDescription] = useState('');
-    const [typePrestation, setTypePrestation] = useState('PROJET');
-    const [ticketJira, setTicketJira] = useState('');
-
     // --- UI ---
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -335,9 +330,10 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         duree: p.duree,
         mode: 'BC',
         statut,
-        descriptionTache: (p.isNew ? description : p.desc || description) || 'Saisie',
-        typePrestation: (p.isNew ? typePrestation : p.type || typePrestation) || 'PROJET',
-        ticketJira: (p.isNew ? ticketJira : p.jira ?? ticketJira) || '',
+        // Défauts fixes : la nature de la prestation est portée par le BC (backend/RA)
+        descriptionTache: (p.isNew ? 'Prestation' : p.desc) || 'Prestation',
+        typePrestation: p.isNew ? null : p.type ?? null,
+        ticketJira: (p.isNew ? '' : p.jira) || '',
     }));
 
     /** Jours ouvrés non couverts (ni présence, ni absence, ni férié). */
@@ -656,6 +652,14 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                 <>
                     {renderTimeline()}
 
+                    {/* --- Récapitulatif du mois --- */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <StatCard label="Jours travaillés" value={recap.joursTravailles} unit="j" />
+                        <StatCard label="Absences" value={recap.nbAbsences} unit="j" accent={COLORS.red} />
+                        <StatCard label="Fériés" value={recap.nbFeries} unit="j" accent={COLORS.gold} />
+                        <StatCard label="Total JH mois" value={recap.totalJH} accent={COLORS.green} />
+                    </div>
+
                     {!prevMonthOk && (
                         <div className="bg-amber-50 border-l-4 border-amber-500 rounded-r-xl p-4 flex items-start gap-3">
                             <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
@@ -768,9 +772,8 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                                     </Button>
                                 </Card>
                             ) : (
-                                <>
-                                    {/* --- Sélecteur de BC --- */}
-                                    <Card>
+                                /* --- Sélecteur de BC --- */
+                                <Card>
                                         <h3 className="text-sm font-black uppercase mb-3 flex items-center gap-2" style={{ color: COLORS.blue }}>
                                             <Briefcase size={16} /> Bon de commande actif
                                         </h3>
@@ -795,47 +798,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                                             </div>
                                         )}
                                     </Card>
-
-                                    {/* --- Description des nouveaux jours --- */}
-                                    <Card>
-                                        <h3 className="text-sm font-black uppercase mb-3" style={{ color: COLORS.blue }}>
-                                            Description des saisies
-                                        </h3>
-                                        <p className="text-[10px] text-gray-400 mb-3">
-                                            Appliquée aux nouveaux jours peints lors de l'enregistrement.
-                                        </p>
-                                        <div className="space-y-3">
-                                            <input
-                                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-gray-400"
-                                                placeholder="Description de l'activité…"
-                                                value={description}
-                                                onChange={(e) => setDescription(e.target.value)} />
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <select
-                                                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none"
-                                                    value={typePrestation}
-                                                    onChange={(e) => setTypePrestation(e.target.value)}>
-                                                    <option value="PROJET">PROJET</option>
-                                                    <option value="RUN">RUN</option>
-                                                </select>
-                                                <input
-                                                    className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-gray-400"
-                                                    placeholder="Ticket Jira"
-                                                    value={ticketJira}
-                                                    onChange={(e) => setTicketJira(e.target.value)} />
-                                            </div>
-                                        </div>
-                                    </Card>
-                                </>
                             )}
-
-                            {/* --- Récapitulatif --- */}
-                            <div className="grid grid-cols-2 gap-3">
-                                <StatCard label="Jours travaillés" value={recap.joursTravailles} unit="j" />
-                                <StatCard label="Absences" value={recap.nbAbsences} unit="j" accent={COLORS.red} />
-                                <StatCard label="Fériés" value={recap.nbFeries} unit="j" accent={COLORS.gold} />
-                                <StatCard label="Total JH mois" value={recap.totalJH} accent={COLORS.green} />
-                            </div>
                         </div>
                     </div>
 

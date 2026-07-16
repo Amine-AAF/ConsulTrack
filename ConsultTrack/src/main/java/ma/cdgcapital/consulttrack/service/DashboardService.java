@@ -407,6 +407,12 @@ public class DashboardService {
                             "Consultant introuvable: " + bc.getConsultantId()));
             bc.setConsultant(c);
         }
+        // Nature déduite du code budgétaire : R… = RUN, P… = PROJET
+        if (bc.getCodeBudget() != null && !bc.getCodeBudget().isBlank()) {
+            char c = Character.toUpperCase(bc.getCodeBudget().trim().charAt(0));
+            if (c == 'R') bc.setNature(NatureActivite.RUN);
+            else if (c == 'P') bc.setNature(NatureActivite.PROJET);
+        }
         if (bc.getJoursConsommes() == null) bc.setJoursConsommes(0.0);
         if (bc.getJoursEngages() == null) bc.setJoursEngages(0.0);
         if (bc.getMontantConsomme() == null) bc.setMontantConsomme(0.0);
