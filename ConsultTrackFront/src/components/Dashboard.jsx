@@ -77,8 +77,7 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [year, setYear] = useState(new Date().getFullYear());
-    const [me, setMe] = useState(null);            // pour RESPONSABLE (cabinetsGeres)
-    const [cabinets, setCabinets] = useState([]);  // pour filtre ADMIN
+    const [cabinets, setCabinets] = useState([]);  // filtre ADMIN/RESPONSABLE (liste scopée serveur)
     const [filterCabinet, setFilterCabinet] = useState('');
     const [filterConsultant, setFilterConsultant] = useState('');
     const [filterCode, setFilterCode] = useState('');
@@ -89,9 +88,10 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
         const fetchAll = async () => {
             setLoading(true);
             try {
+                // /dashboard/report et /admin/cabinets sont scopés côté serveur :
+                // un RESPONSABLE ne reçoit que ses cabinets gérés.
                 const promises = [api.get(`/dashboard/report?annee=${year}`)];
-                if (isResponsable) promises.push(api.get('/me'));
-                if (isAdmin) promises.push(api.get('/admin/cabinets'));
+                if (isAdmin || isResponsable) promises.push(api.get('/admin/cabinets'));
                 const results = await Promise.all(promises);
 
                 let reportData = results[0].data || [];
@@ -107,8 +107,7 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
 
                 if (!isMounted) return;
                 setData(reportData);
-                if (isResponsable) setMe(results[1].data);
-                if (isAdmin) setCabinets(results[1].data || []);
+                if (isAdmin || isResponsable) setCabinets(results[1].data || []);
             } catch (error) {
                 console.error('Erreur dashboard', error);
                 if (isMounted) setData([]);
@@ -120,20 +119,16 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
         return () => { isMounted = false; };
     }, [year, userId, userRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // --- Lignes visibles selon le rôle ---
+    // --- Lignes visibles selon les filtres (ADMIN + RESPONSABLE) ---
     const scopedRows = useMemo(() => {
         let rows = data;
-        if (isResponsable && me) {
-            const noms = new Set((me.cabinetsGeres || []).map(c => c.nom));
-            rows = rows.filter(r => noms.has(r.nomCabinet));
-        }
-        if (isAdmin && filterCabinet) {
+        if (!isConsultant && filterCabinet) {
             rows = rows.filter(r => r.nomCabinet === filterCabinet);
         }
-        if (isAdmin && filterConsultant) {
+        if (!isConsultant && filterConsultant) {
             rows = rows.filter(r => r.nomConsultant === filterConsultant);
         }
-        if (isAdmin && filterCode) {
+        if (!isConsultant && filterCode) {
             rows = rows.filter(r => r.descriptionCodeBudgetaire === filterCode);
         }
         if (searchTerm) {
@@ -143,21 +138,21 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                 (r.referenceBC?.toLowerCase() || '').includes(q));
         }
         return rows;
-    }, [data, me, filterCabinet, filterConsultant, filterCode, searchTerm, isResponsable, isAdmin]);
+    }, [data, filterCabinet, filterConsultant, filterCode, searchTerm, isConsultant]);
 
-    // Options du filtre consultant (ADMIN) : noms dédupliqués issus du rapport
+    // Options du filtre consultant (ADMIN/RESPONSABLE) : noms dédupliqués issus du rapport
     const consultantOptions = useMemo(() =>
         [...new Set(data.map(r => r.nomConsultant).filter(Boolean))]
             .sort((a, b) => a.localeCompare(b)),
     [data]);
 
-    // Options du filtre code budgétaire (ADMIN) : codes dédupliqués issus du rapport
+    // Options du filtre code budgétaire (ADMIN/RESPONSABLE) : codes dédupliqués issus du rapport
     const codeOptions = useMemo(() =>
         [...new Set(data.map(r => r.descriptionCodeBudgetaire).filter(Boolean))]
             .sort((a, b) => a.localeCompare(b)),
     [data]);
 
-    // Synthèse du budget sélectionné (ADMIN)
+    // Synthèse du budget sélectionné (ADMIN/RESPONSABLE)
     const budgetSummary = useMemo(() => {
         if (!filterCode) return null;
         return {
@@ -188,7 +183,7 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
         return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
     }, [scopedRows]);
 
-    // --- Activité réalisée (ADMIN) : lignes groupées par consultant ---
+    // --- Activité réalisée (ADMIN/RESPONSABLE) : lignes groupées par consultant ---
     const activiteParConsultant = useMemo(() => {
         const groups = scopedRows.reduce((acc, r) => {
             const key = r.nomConsultant || 'Inconnu';
@@ -258,7 +253,7 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                 </div>
             )}
 
-            {/* Filtres (ADMIN : cabinet + recherche ; RESPONSABLE : recherche) */}
+            {/* Filtres (ADMIN + RESPONSABLE : cabinet, consultant, code budgétaire, recherche) */}
             {!isConsultant && (
                 <div className="flex flex-col md:flex-row gap-3 mb-6">
                     <div className="flex-1 flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
@@ -270,7 +265,7 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                             onChange={e => setSearchTerm(e.target.value)}
                         />
                     </div>
-                    {isAdmin && (
+                    {(isAdmin || isResponsable) && (
                         <>
                             <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
                                 <Filter size={16} style={{ color: COLORS.blue }} />
@@ -313,8 +308,8 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                 </div>
             )}
 
-            {/* Synthèse du budget sélectionné (ADMIN) */}
-            {isAdmin && budgetSummary && (
+            {/* Synthèse du budget sélectionné (ADMIN + RESPONSABLE) */}
+            {!isConsultant && budgetSummary && (
                 <div className="flex items-center gap-2 mb-6 -mt-3 text-sm font-bold px-4 py-2.5 rounded-xl border"
                      style={{ backgroundColor: '#eef4ff', borderColor: '#dbeafe', color: COLORS.blue }}>
                     <Wallet size={15} />
@@ -442,8 +437,8 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                 </div>
             )}
 
-            {/* ============ ADMIN : Activité réalisée par consultant / année / BC ============ */}
-            {isAdmin && activiteParConsultant.length > 0 && (
+            {/* ==== ADMIN + RESPONSABLE : Activité réalisée par consultant / année / BC ==== */}
+            {!isConsultant && activiteParConsultant.length > 0 && (
                 <Card className="mt-6">
                     <h3 className="font-black text-lg flex items-center gap-2 mb-4" style={{ color: COLORS.blue }}>
                         <LayoutDashboard size={20} style={{ color: COLORS.green }} /> Activité réalisée — {year}

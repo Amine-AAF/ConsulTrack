@@ -148,17 +148,13 @@ const App = () => {
                                 <Route path="/absences" element={<AbsenceForm userRole={userRole} userId={currentUserId} />} />
                             </Route>
 
-                            {/* Validation + référentiel (admin + responsable) */}
+                            {/* Validation + référentiel + saisie déléguée (admin + responsable) */}
                             <Route element={<PrivateRoute allowedRoles={['ADMIN', 'RESPONSABLE']} />}>
                                 <Route path="/validation" element={<ValidationHub />} />
                                 <Route path="/facturation" element={<Facturation />} />
                                 <Route path="/admin" element={<AdminPanel userRole={userRole} />} />
-                            </Route>
-
-                            {/* Saisie déléguée (admin uniquement) */}
-                            <Route element={<PrivateRoute allowedRoles={['ADMIN']} />}>
-                                <Route path="/admin/timesheet-global" element={<TimesheetForm userRole="ADMIN" />} />
-                                <Route path="/admin/saisie-absence" element={<AbsenceForm userRole="ADMIN" />} />
+                                <Route path="/admin/timesheet-global" element={<TimesheetForm userRole={userRole} />} />
+                                <Route path="/admin/saisie-absence" element={<AbsenceForm userRole={userRole} />} />
                             </Route>
 
                             <Route path="*" element={<Navigate to="/" replace />} />
@@ -240,7 +236,7 @@ const Navigation = ({ userRole, sectionTitleStyle, pending }) => {
                 </>
             )}
 
-            {userRole === 'ADMIN' && (
+            {(userRole === 'ADMIN' || userRole === 'RESPONSABLE') && (
                 <>
                     <div style={sectionTitleStyle}>Saisie Déléguée</div>
                     <NavLink to="/admin/timesheet-global" active={is('/admin/timesheet-global')}>

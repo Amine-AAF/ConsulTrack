@@ -31,8 +31,11 @@ public class DashboardController {
     @GetMapping("/dashboard/report")
     public ResponseEntity<List<ConsultantDashboardDTO>> getReport(
             @RequestParam(required = false) Long cabinetId,
-            @RequestParam int annee) {
-        return ResponseEntity.ok(dashboardService.getGlobalReport(cabinetId, annee));
+            @RequestParam int annee,
+            Authentication auth) {
+        // RESPONSABLE : lignes limitées aux consultants de ses cabinets gérés
+        return ResponseEntity.ok(dashboardService.getGlobalReport(
+                cabinetId, annee, accessGuard.currentUser(auth)));
     }
 
     @GetMapping("/dashboard/timesheet/{consultantId}")
@@ -70,8 +73,9 @@ public class DashboardController {
 
     // --- CABINETS ---
     @GetMapping("/admin/cabinets")
-    public ResponseEntity<List<CabinetDTO>> getAllCabinets() {
-        return ResponseEntity.ok(dashboardService.getAllCabinets()
+    public ResponseEntity<List<CabinetDTO>> getAllCabinets(Authentication auth) {
+        // RESPONSABLE : uniquement ses cabinets gérés
+        return ResponseEntity.ok(dashboardService.getAllCabinets(accessGuard.currentUser(auth))
                 .stream().map(EntityMapper::toDto).toList());
     }
 
@@ -106,32 +110,42 @@ public class DashboardController {
     }
 
     @PutMapping("/admin/consultants/{id}")
-    public ResponseEntity<ConsultantDTO> updateConsultant(@PathVariable Long id, @RequestBody Consultant consultant) {
-        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.updateConsultant(id, consultant)));
+    public ResponseEntity<ConsultantDTO> updateConsultant(@PathVariable Long id,
+                                                          @RequestBody Consultant consultant,
+                                                          Authentication auth) {
+        // RESPONSABLE : cible CONSULTANT de son périmètre, rôle/cabinet verrouillés
+        return ResponseEntity.ok(EntityMapper.toDto(
+                dashboardService.updateConsultant(id, consultant, accessGuard.currentUser(auth))));
     }
 
     @DeleteMapping("/admin/consultants/{id}")
-    public ResponseEntity<Void> deleteConsultant(@PathVariable Long id) {
-        dashboardService.deleteConsultant(id);
+    public ResponseEntity<Void> deleteConsultant(@PathVariable Long id, Authentication auth) {
+        // RESPONSABLE : cible CONSULTANT de son périmètre uniquement
+        dashboardService.deleteConsultant(id, accessGuard.currentUser(auth));
         return ResponseEntity.ok().build();
     }
 
     // --- CONSULTANTS ---
     @GetMapping("/admin/consultants")
-    public ResponseEntity<List<ConsultantDTO>> getAllConsultants() {
-        return ResponseEntity.ok(dashboardService.getAllConsultants()
+    public ResponseEntity<List<ConsultantDTO>> getAllConsultants(Authentication auth) {
+        // RESPONSABLE : consultants de ses cabinets gérés (+ lui-même)
+        return ResponseEntity.ok(dashboardService.getAllConsultants(accessGuard.currentUser(auth))
                 .stream().map(EntityMapper::toDto).toList());
     }
 
     @PostMapping("/admin/consultants")
-    public ResponseEntity<ConsultantDTO> createConsultant(@RequestBody Consultant consultant) {
-        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.saveConsultant(consultant)));
+    public ResponseEntity<ConsultantDTO> createConsultant(@RequestBody Consultant consultant,
+                                                          Authentication auth) {
+        // RESPONSABLE : rôle forcé CONSULTANT, cabinet dans son périmètre
+        return ResponseEntity.ok(EntityMapper.toDto(
+                dashboardService.saveConsultant(consultant, accessGuard.currentUser(auth))));
     }
 
     // --- BONS DE COMMANDE (BC) ---
     @GetMapping("/admin/bcs")
-    public ResponseEntity<List<BonDeCommandeDTO>> getAllBCs() {
-        return ResponseEntity.ok(dashboardService.getAllBCs()
+    public ResponseEntity<List<BonDeCommandeDTO>> getAllBCs(Authentication auth) {
+        // RESPONSABLE : uniquement les BC des consultants de son périmètre
+        return ResponseEntity.ok(dashboardService.getAllBCs(accessGuard.currentUser(auth))
                 .stream().map(EntityMapper::toDto).toList());
     }
 

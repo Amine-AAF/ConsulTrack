@@ -7,9 +7,11 @@ import {
 } from 'lucide-react';
 
 const AbsenceForm = ({ userRole = 'CONSULTANT', userId = null }) => {
-    // États pour la logique Admin/Consultant
+    // Saisie déléguée : ADMIN (tous) ou RESPONSABLE (consultants de ses cabinets, liste scopée serveur)
+    const isDelegue = userRole === 'ADMIN' || userRole === 'RESPONSABLE';
+    // États pour la logique Admin/Responsable/Consultant
     const [consultants, setConsultants] = useState([]);
-    const [targetConsultantId, setTargetConsultantId] = useState(userRole === 'ADMIN' ? '' : userId);
+    const [targetConsultantId, setTargetConsultantId] = useState(isDelegue ? '' : userId);
 
     // États du formulaire
     const [startDate, setStartDate] = useState('');
@@ -20,9 +22,9 @@ const AbsenceForm = ({ userRole = 'CONSULTANT', userId = null }) => {
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState(null);
 
-    // 1. Initialisation : Si Admin, charger la liste. Si Consultant, figer l'ID.
+    // 1. Initialisation : Si Admin/Responsable, charger la liste. Si Consultant, figer l'ID.
     useEffect(() => {
-        if (userRole === 'ADMIN') {
+        if (isDelegue) {
             const fetchConsultants = async () => {
                 try {
                     const res = await api.get('/admin/consultants');
@@ -33,7 +35,7 @@ const AbsenceForm = ({ userRole = 'CONSULTANT', userId = null }) => {
         } else {
             setTargetConsultantId(userId); // Verrouillage sur l'utilisateur connecté
         }
-    }, [userRole, userId]);
+    }, [isDelegue, userId]);
 
     // 2. Utilitaires dates (Week-end)
     const isWeekend = (dateStr) => {
@@ -65,8 +67,8 @@ const AbsenceForm = ({ userRole = 'CONSULTANT', userId = null }) => {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        // Validation Admin : il faut choisir un consultant
-        if (userRole === 'ADMIN' && !targetConsultantId) {
+        // Validation Admin/Responsable : il faut choisir un consultant
+        if (isDelegue && !targetConsultantId) {
             setStatus({ type: 'error', message: "Veuillez sélectionner un consultant dans la liste." });
             return;
         }
@@ -135,8 +137,10 @@ const AbsenceForm = ({ userRole = 'CONSULTANT', userId = null }) => {
                                 <Coffee size={28} color="#C5A059" />
                                 Demande d'Absence
                             </h2>
-                            {userRole === 'ADMIN' ? (
-                                <p className="text-xs font-bold text-amber-600 mt-1 uppercase tracking-widest bg-amber-50 inline-block px-2 py-1 rounded">Mode Administrateur</p>
+                            {isDelegue ? (
+                                <p className="text-xs font-bold text-amber-600 mt-1 uppercase tracking-widest bg-amber-50 inline-block px-2 py-1 rounded">
+                                    {userRole === 'ADMIN' ? 'Mode Administrateur' : 'Mode Responsable'}
+                                </p>
                             ) : (
                                 <p className="text-xs font-bold text-gray-400 mt-1 uppercase tracking-widest">Espace Consultant</p>
                             )}
@@ -149,7 +153,7 @@ const AbsenceForm = ({ userRole = 'CONSULTANT', userId = null }) => {
                     <form onSubmit={handleSubmit} className="space-y-6">
 
                         {/* --- ZONE DYNAMIQUE : SÉLECTION DU CONSULTANT --- */}
-                        {userRole === 'ADMIN' && (
+                        {isDelegue && (
                             <div className="bg-[#f8fafc] p-5 rounded-2xl border border-dashed border-gray-300">
                                 <label className="text-[11px] font-black text-[#003366] uppercase tracking-widest flex items-center gap-2 mb-3">
                                     <UserCheck size={16} color="#C5A059"/> Saisir pour le compte de :

@@ -32,15 +32,47 @@ public class DashboardService {
     @Autowired private PasswordEncoder passwordEncoder;
 
     // ==========================================
+    // 0. PÉRIMÈTRE RESPONSABLE (cabinets gérés)
+    // ==========================================
+
+    /** null = pas de restriction (ADMIN/CONSULTANT) ; sinon ids des cabinets gérés du RESPONSABLE. */
+    private static Set<Long> cabinetScope(Consultant viewer) {
+        if (viewer == null || viewer.getRole() != Role.RESPONSABLE) return null;
+        return viewer.getCabinetsGeres() == null ? Set.of()
+                : viewer.getCabinetsGeres().stream().map(Cabinet::getId).collect(Collectors.toSet());
+    }
+
+    private static boolean inScope(Consultant c, Set<Long> scope) {
+        if (scope == null) return true;
+        return c != null && c.getCabinet() != null && scope.contains(c.getCabinet().getId());
+    }
+
+    /** RESPONSABLE : la cible doit être un CONSULTANT de ses cabinets gérés. */
+    private void assertCibleGerable(Consultant cible, Set<Long> scope) {
+        if (scope == null) return;
+        if (!inScope(cible, scope)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Accès refusé : consultant hors de votre périmètre de cabinets.");
+        }
+        if (cible.getRole() != Role.CONSULTANT) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Accès refusé : un responsable ne gère que des comptes CONSULTANT.");
+        }
+    }
+
+    // ==========================================
     // 1. DASHBOARD & TIMESHEET (Lecture)
     // ==========================================
 
-    public List<ConsultantDashboardDTO> getGlobalReport(Long cabinetId, int annee) {
+    public List<ConsultantDashboardDTO> getGlobalReport(Long cabinetId, int annee, Consultant viewer) {
+        Set<Long> scope = cabinetScope(viewer);
         List<BonDeCommande> bcs = bcRepository.findAll();
         List<ConsultantDashboardDTO> report = new ArrayList<>();
 
         for (BonDeCommande bc : bcs) {
             if (bc.getConsultant() == null) continue;
+            // RESPONSABLE : uniquement les consultants de ses cabinets gérés
+            if (!inScope(bc.getConsultant(), scope)) continue;
 
             if (cabinetId != null) {
                 if (bc.getConsultant().getCabinet() == null
@@ -303,6 +335,16 @@ public class DashboardService {
     // ==========================================
 
     public List<Cabinet> getAllCabinets() { return cabinetRepository.findAll(); }
+
+    /** RESPONSABLE : uniquement ses cabinets gérés. ADMIN : tous. */
+    public List<Cabinet> getAllCabinets(Consultant viewer) {
+        Set<Long> scope = cabinetScope(viewer);
+        if (scope == null) return getAllCabinets();
+        return cabinetRepository.findAll().stream()
+                .filter(c -> scope.contains(c.getId()))
+                .collect(Collectors.toList());
+    }
+
     public Cabinet saveCabinet(Cabinet cabinet) { return cabinetRepository.save(cabinet); }
 
     @Transactional
@@ -353,6 +395,31 @@ public class DashboardService {
         cabinetRepository.deleteById(id);
     }
 
+    /** Mise à jour avec périmètre : un RESPONSABLE ne modifie que les CONSULTANT de ses cabinets. */
+    @Transactional
+    public Consultant updateConsultant(Long id, Consultant maj, Consultant viewer) {
+        Set<Long> scope = cabinetScope(viewer);
+        if (scope != null) {
+            Consultant cible = consultantRepository.findById(id)
+                    .orElseThrow(() -> new BusinessException("Consultant introuvable: " + id));
+            assertCibleGerable(cible, scope);
+            // Anti-escalade : impossible d'attribuer un autre rôle que CONSULTANT
+            if (maj.getRole() != null && maj.getRole() != Role.CONSULTANT) {
+                throw new BusinessException(
+                        "Un responsable ne peut pas attribuer le rôle " + maj.getRole() + ".");
+            }
+            // Le cabinet cible doit rester dans son périmètre
+            if (maj.getCabinet() != null && maj.getCabinet().getId() != null
+                    && !scope.contains(maj.getCabinet().getId())) {
+                throw new BusinessException(
+                        "Le cabinet choisi ne fait pas partie de vos cabinets gérés.");
+            }
+            // Un responsable ne définit jamais de cabinets gérés
+            maj.setCabinetsGeresIds(null);
+        }
+        return updateConsultant(id, maj);
+    }
+
     @Transactional
     public Consultant updateConsultant(Long id, Consultant maj) {
         Consultant c = consultantRepository.findById(id)
@@ -379,6 +446,18 @@ public class DashboardService {
         return consultantRepository.save(c);
     }
 
+    /** Suppression avec périmètre : un RESPONSABLE ne supprime que les CONSULTANT de ses cabinets. */
+    @Transactional
+    public void deleteConsultant(Long id, Consultant viewer) {
+        Set<Long> scope = cabinetScope(viewer);
+        if (scope != null) {
+            Consultant cible = consultantRepository.findById(id)
+                    .orElseThrow(() -> new BusinessException("Consultant introuvable: " + id));
+            assertCibleGerable(cible, scope);
+        }
+        deleteConsultant(id);
+    }
+
     @Transactional
     public void deleteConsultant(Long id) {
         boolean aDesDonnees = !tacheRepository.findByConsultantId(id).isEmpty()
@@ -394,8 +473,39 @@ public class DashboardService {
 
     public List<Consultant> getAllConsultants() { return consultantRepository.findAll(); }
 
+    /** RESPONSABLE : consultants de ses cabinets gérés (+ lui-même). ADMIN : tous. */
+    public List<Consultant> getAllConsultants(Consultant viewer) {
+        Set<Long> scope = cabinetScope(viewer);
+        if (scope == null) return getAllConsultants();
+        return consultantRepository.findAll().stream()
+                .filter(c -> c.getId().equals(viewer.getId()) || inScope(c, scope))
+                .collect(Collectors.toList());
+    }
+
+    /** Création avec périmètre : un RESPONSABLE ne crée que des CONSULTANT dans ses cabinets. */
+    public Consultant saveConsultant(Consultant consultant, Consultant viewer) {
+        Set<Long> scope = cabinetScope(viewer);
+        if (scope != null) {
+            // Anti-escalade : rôle imposé CONSULTANT
+            if (consultant.getRole() != null && consultant.getRole() != Role.CONSULTANT) {
+                throw new BusinessException(
+                        "Un responsable ne peut créer que des comptes CONSULTANT.");
+            }
+            consultant.setRole(Role.CONSULTANT);
+            // Cabinet obligatoire et dans son périmètre
+            Long cabinetId = consultant.getCabinet() != null ? consultant.getCabinet().getId() : null;
+            if (cabinetId == null || !scope.contains(cabinetId)) {
+                throw new BusinessException(
+                        "Le cabinet du consultant doit faire partie de vos cabinets gérés.");
+            }
+            // Un responsable ne définit jamais de cabinets gérés
+            consultant.setCabinetsGeresIds(null);
+        }
+        return saveConsultant(consultant);
+    }
+
     public Consultant saveConsultant(Consultant consultant) {
-        // Rôle par défaut : CONSULTANT (l'endpoint de création est réservé à l'ADMIN)
+        // Rôle par défaut : CONSULTANT
         if (consultant.getRole() == null) {
             consultant.setRole(Role.CONSULTANT);
         }
@@ -424,6 +534,15 @@ public class DashboardService {
     }
 
     public List<BonDeCommande> getAllBCs() { return bcRepository.findAll(); }
+
+    /** RESPONSABLE : uniquement les BC des consultants de ses cabinets gérés. ADMIN : tous. */
+    public List<BonDeCommande> getAllBCs(Consultant viewer) {
+        Set<Long> scope = cabinetScope(viewer);
+        if (scope == null) return getAllBCs();
+        return bcRepository.findAll().stream()
+                .filter(bc -> inScope(bc.getConsultant(), scope))
+                .collect(Collectors.toList());
+    }
 
     public BonDeCommande saveBC(BonDeCommande bc) {
         if (bc.getConsultantId() != null) {

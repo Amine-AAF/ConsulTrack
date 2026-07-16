@@ -52,7 +52,7 @@ const AdminPanel = ({ userRole }) => {
 
     const tabs = [
         { key: 'cabinets', label: 'Cabinets' },
-        ...(isAdmin ? [{ key: 'users', label: 'Utilisateurs' }] : []),
+        { key: 'users', label: 'Utilisateurs' },
         { key: 'bcs', label: 'Bons de Commande' },
         ...(isAdmin ? [{ key: 'feries', label: 'Jours fériés' }] : []),
     ];
@@ -93,8 +93,9 @@ const AdminPanel = ({ userRole }) => {
             ) : (
                 <>
                     {activeTab === 'cabinets' && <CabinetSection cabinets={cabinets} onRefresh={loadData} />}
-                    {activeTab === 'users' && isAdmin && (
-                        <UserSection consultants={consultants} cabinets={cabinets} onRefresh={loadData} />
+                    {activeTab === 'users' && (
+                        <UserSection consultants={consultants} cabinets={cabinets}
+                                     onRefresh={loadData} isAdmin={isAdmin} />
                     )}
                     {activeTab === 'bcs' && <BCSection bcs={bcs} consultants={consultants} onRefresh={loadData} />}
                     {activeTab === 'feries' && isAdmin && <JoursFeriesSection />}
@@ -292,9 +293,11 @@ const CabinetSection = ({ cabinets, onRefresh }) => {
 };
 
 /* ==========================================
-   2. UTILISATEURS (ADMIN uniquement)
+   2. UTILISATEURS (ADMIN + RESPONSABLE)
+   RESPONSABLE : rôle verrouillé CONSULTANT, cabinets limités
+   à ses cabinets gérés (listes scopées côté serveur).
    ========================================== */
-const UserSection = ({ consultants, cabinets, onRefresh }) => {
+const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
     const emptyForm = { nom: '', prenom: '', email: '', password: '', role: 'CONSULTANT', cabinetId: '', cabinetsGeresIds: [] };
     const [form, setForm] = useState(emptyForm);
     const [editingId, setEditingId] = useState(null);
@@ -320,7 +323,7 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
             prenom: c.prenom || '',
             email: c.email || '',
             password: '',
-            role: c.role || 'CONSULTANT',
+            role: isAdmin ? (c.role || 'CONSULTANT') : 'CONSULTANT',
             cabinetId: c.cabinet?.id != null ? String(c.cabinet.id) : '',
             cabinetsGeresIds: [],
         });
@@ -356,17 +359,20 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
                 nom: form.nom,
                 prenom: form.prenom,
                 email: form.email,
-                role: form.role,
+                // Un RESPONSABLE ne crée/modifie que des comptes CONSULTANT (imposé aussi côté serveur)
+                role: isAdmin ? form.role : 'CONSULTANT',
                 cabinet: form.cabinetId ? { id: parseInt(form.cabinetId, 10) } : null,
             };
             if (form.password) payload.password = form.password; // vide en édition = conservé
             if (editingId) {
-                if (form.role === 'RESPONSABLE' && geresTouched) {
+                if (isAdmin && form.role === 'RESPONSABLE' && geresTouched) {
                     payload.cabinetsGeresIds = form.cabinetsGeresIds;
                 }
                 await api.put(`/admin/consultants/${editingId}`, payload);
             } else {
-                payload.cabinetsGeresIds = form.role === 'RESPONSABLE' ? form.cabinetsGeresIds : [];
+                if (isAdmin) {
+                    payload.cabinetsGeresIds = form.role === 'RESPONSABLE' ? form.cabinetsGeresIds : [];
+                }
                 await api.post('/admin/consultants', payload);
             }
             setForm(emptyForm);
@@ -407,12 +413,19 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
                            placeholder={editingId ? 'Nouveau mot de passe (laisser vide pour conserver)' : 'Mot de passe *'}
                            value={form.password}
                            onChange={e => setForm({ ...form, password: e.target.value })} />
-                    <select className={inputCls} value={form.role}
-                            onChange={e => setForm({ ...form, role: e.target.value })}>
-                        <option value="CONSULTANT">Consultant</option>
-                        <option value="RESPONSABLE">Responsable</option>
-                        <option value="ADMIN">Admin</option>
-                    </select>
+                    {isAdmin ? (
+                        <select className={inputCls} value={form.role}
+                                onChange={e => setForm({ ...form, role: e.target.value })}>
+                            <option value="CONSULTANT">Consultant</option>
+                            <option value="RESPONSABLE">Responsable</option>
+                            <option value="ADMIN">Admin</option>
+                        </select>
+                    ) : (
+                        <div className={`${inputCls} flex items-center justify-between bg-gray-50 text-gray-500`}>
+                            <span className="font-bold">Rôle : Consultant</span>
+                            <RoleBadge role="CONSULTANT" />
+                        </div>
+                    )}
                     <select className={inputCls} value={form.cabinetId}
                             onChange={e => setForm({ ...form, cabinetId: e.target.value })}>
                         <option value="">
@@ -422,7 +435,7 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
                     </select>
                 </div>
 
-                {form.role === 'RESPONSABLE' && (
+                {isAdmin && form.role === 'RESPONSABLE' && (
                     <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
                         <div className="text-[11px] uppercase font-black tracking-wider text-gray-400 mb-3">
                             Cabinets gérés
