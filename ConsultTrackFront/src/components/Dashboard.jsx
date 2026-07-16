@@ -80,6 +80,7 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
     const [me, setMe] = useState(null);            // pour RESPONSABLE (cabinetsGeres)
     const [cabinets, setCabinets] = useState([]);  // pour filtre ADMIN
     const [filterCabinet, setFilterCabinet] = useState('');
+    const [filterConsultant, setFilterConsultant] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
@@ -128,6 +129,9 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
         if (isAdmin && filterCabinet) {
             rows = rows.filter(r => r.nomCabinet === filterCabinet);
         }
+        if (isAdmin && filterConsultant) {
+            rows = rows.filter(r => r.nomConsultant === filterConsultant);
+        }
         if (searchTerm) {
             const q = searchTerm.toLowerCase();
             rows = rows.filter(r =>
@@ -135,7 +139,13 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                 (r.referenceBC?.toLowerCase() || '').includes(q));
         }
         return rows;
-    }, [data, me, filterCabinet, searchTerm, isResponsable, isAdmin]);
+    }, [data, me, filterCabinet, filterConsultant, searchTerm, isResponsable, isAdmin]);
+
+    // Options du filtre consultant (ADMIN) : noms dédupliqués issus du rapport
+    const consultantOptions = useMemo(() =>
+        [...new Set(data.map(r => r.nomConsultant).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b)),
+    [data]);
 
     // --- KPI ---
     const kpi = useMemo(() => {
@@ -232,18 +242,32 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                         />
                     </div>
                     {isAdmin && (
-                        <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
-                            <Filter size={16} style={{ color: COLORS.blue }} />
-                            <select
-                                className="bg-transparent outline-none text-sm font-bold cursor-pointer"
-                                style={{ color: COLORS.blue }}
-                                value={filterCabinet}
-                                onChange={e => setFilterCabinet(e.target.value)}
-                            >
-                                <option value="">Tous les cabinets</option>
-                                {cabinets.map(c => <option key={c.id} value={c.nom}>{c.nom}</option>)}
-                            </select>
-                        </div>
+                        <>
+                            <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
+                                <Filter size={16} style={{ color: COLORS.blue }} />
+                                <select
+                                    className="bg-transparent outline-none text-sm font-bold cursor-pointer"
+                                    style={{ color: COLORS.blue }}
+                                    value={filterCabinet}
+                                    onChange={e => setFilterCabinet(e.target.value)}
+                                >
+                                    <option value="">Tous les cabinets</option>
+                                    {cabinets.map(c => <option key={c.id} value={c.nom}>{c.nom}</option>)}
+                                </select>
+                            </div>
+                            <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
+                                <Users size={16} style={{ color: COLORS.blue }} />
+                                <select
+                                    className="bg-transparent outline-none text-sm font-bold cursor-pointer"
+                                    style={{ color: COLORS.blue }}
+                                    value={filterConsultant}
+                                    onChange={e => setFilterConsultant(e.target.value)}
+                                >
+                                    <option value="">Tous les consultants</option>
+                                    {consultantOptions.map(nom => <option key={nom} value={nom}>{nom}</option>)}
+                                </select>
+                            </div>
+                        </>
                     )}
                 </div>
             )}

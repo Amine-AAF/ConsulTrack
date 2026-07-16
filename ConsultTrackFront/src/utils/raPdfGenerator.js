@@ -1,124 +1,204 @@
 import jsPDF from 'jspdf';
 
+/* ================================================================
+   Rapport d'Activité — format pilote (Jamoure 2026).
+
+   Structure du champ ra.tachesRealisees (un seul champ TEXT) :
+       @@BC:{reference}@@\n{texte de la section}   (sections jointes par '\n')
+   Dans une section : ligne sans '-' initial = THÈME (puce '•'),
+   ligne commençant par '- ' = tâche du thème (sous-puce 'o').
+   Texte legacy sans marqueurs → puces simples sous une section unique.
+   ================================================================ */
+
 const CDG_BLUE = '#003366';
+const MARGIN_L = 14;
+const MARGIN_R = 196;
+const PAGE_W = 210;
 
 const fmt = (n) => (n == null ? '0' : (Number.isInteger(n) ? String(n) : Number(n).toFixed(1)));
 
+const BC_MARKER_RE = /@@BC:(.+?)@@/;
+
+/** Découpe le texte stocké en { reference → texte de section }. */
+const parseSections = (texte) => {
+    const map = {};
+    const txt = texte || '';
+    if (!txt.trim() || !BC_MARKER_RE.test(txt)) return map; // legacy géré à part
+    const parts = txt.split(/@@BC:(.+?)@@/); // [avant, ref1, txt1, ref2, txt2, ...]
+    for (let i = 1; i < parts.length; i += 2) {
+        map[parts[i]] = (parts[i + 1] || '').replace(/^\n/, '').replace(/\s+$/, '');
+    }
+    return map;
+};
+
+/** Période « 01/{mois}/{annee} au {dernier jour}/{mois}/{annee} ». */
+const buildPeriode = (ra) => {
+    if (ra.mois && ra.annee) {
+        const mm = String(ra.mois).padStart(2, '0');
+        const last = new Date(ra.annee, ra.mois, 0).getDate();
+        return `01/${mm}/${ra.annee} au ${String(last).padStart(2, '0')}/${mm}/${ra.annee}`;
+    }
+    return ra.moisLabel || '—';
+};
+
 /**
- * Génère le PDF du Rapport d'Activité mensuel, fidèle au document réel.
+ * Génère le PDF du Rapport d'Activité mensuel (format pilote Jamoure 2026).
  * @param {object} ra - réponse de GET /api/rapports/activite
  */
 export const generateRaPDF = (ra) => {
     const doc = new jsPDF();
     let y = 20;
-    const pageGuard = (limit = 270) => {
+
+    const pageGuard = (limit = 275) => {
         if (y > limit) { doc.addPage(); y = 20; }
     };
 
-    // ---------- TITRE (bleu, à gauche) ----------
+    /** Titre de groupe / texte souligné. */
+    const underlinedText = (text, x, size = 12, color = CDG_BLUE) => {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(size);
+        doc.setTextColor(color);
+        doc.text(text, x, y);
+        const w = doc.getTextWidth(text);
+        doc.setDrawColor(color);
+        doc.setLineWidth(0.4);
+        doc.line(x, y + 1, x + w, y + 1);
+    };
+
+    // ---------- TITRE : centré, gras, souligné ----------
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
     doc.setTextColor(CDG_BLUE);
-    doc.text("Rapport d'activité", 14, y);
+    const title = "Rapport d'activité";
+    doc.text(title, PAGE_W / 2, y, { align: 'center' });
+    const wTitle = doc.getTextWidth(title);
+    doc.setDrawColor(CDG_BLUE);
+    doc.setLineWidth(0.5);
+    doc.line(PAGE_W / 2 - wTitle / 2, y + 1.5, PAGE_W / 2 + wTitle / 2, y + 1.5);
+    y += 14;
 
-    // ---------- BLOC DROIT : Cabinet / Fonction / Intervenant ----------
-    doc.setFontSize(10);
+    // ---------- BLOC MÉTA (à gauche) ----------
+    doc.setFontSize(11);
     doc.setTextColor(0);
-    let yr = 16;
-    const rightLine = (label, value) => {
+    const metaLine = (label, value, boldValue = false) => {
         doc.setFont('helvetica', 'bold');
-        const text = `${label} : `;
-        const val = String(value || '—');
-        const wLabel = doc.getTextWidth(text);
-        doc.setFont('helvetica', 'normal');
-        const wVal = doc.getTextWidth(val);
-        const x = 196 - wLabel - wVal;
-        doc.setFont('helvetica', 'bold');
-        doc.text(text, x, yr);
-        doc.setFont('helvetica', 'normal');
-        doc.text(val, x + wLabel, yr);
-        yr += 6;
+        const lbl = `${label} : `;
+        doc.text(lbl, MARGIN_L, y);
+        doc.setFont('helvetica', boldValue ? 'bold' : 'normal');
+        doc.text(String(value || '—'), MARGIN_L + doc.getTextWidth(lbl), y);
+        y += 6.5;
     };
-    rightLine('Cabinet', ra.cabinetNom);
-    rightLine('Fonction', ra.fonction);
-    rightLine('Intervenant', ra.consultantNom);
+    metaLine('Consultant', ra.consultantNom);
+    metaLine('Société', ra.cabinetNom);
+    metaLine('Période', buildPeriode(ra));
+    metaLine('Total JH', fmt(ra.totalJH), true);
+    y += 6;
 
-    y = Math.max(y, yr) + 10;
-
-    // ---------- PÉRIODE ----------
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(0);
-    doc.text(`Période : ${ra.moisLabel || '—'}`, 14, y);
-    y += 12;
-
-    // ---------- BDC UTILISÉS ----------
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(CDG_BLUE);
-    doc.text('BDC Utilisés :', 14, y);
-    y += 7;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(0);
+    // ---------- SECTIONS PAR BC (groupes RUN / PROJET) ----------
     const bdcs = ra.bdcUtilises || [];
-    if (bdcs.length === 0) {
-        doc.text('• —', 20, y);
-        y += 6;
-    } else {
-        bdcs.forEach((b) => {
-            pageGuard();
-            doc.text(`• ${b.reference || '—'} : ${fmt(b.jours)} Jours`, 20, y);
-            y += 6;
-        });
+    const sections = parseSections(ra.tachesRealisees);
+    const isLegacy = !!(ra.tachesRealisees || '').trim() && !BC_MARKER_RE.test(ra.tachesRealisees || '');
+    if (isLegacy && bdcs.length > 0) {
+        // Texte legacy sans marqueurs : rattaché à la 1re section BC
+        sections[bdcs[0].reference] = (ra.tachesRealisees || '').trim();
     }
-    y += 8;
 
-    // ---------- TÂCHES RÉALISÉES ----------
-    pageGuard(260);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(CDG_BLUE);
-    doc.text('Tâches réalisées :', 14, y);
-    y += 7;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(0);
-    const taches = (ra.tachesRealisees || '')
-        .split('\n')
-        .map((l) => l.trim().replace(/^•\s*/, ''))
-        .filter(Boolean);
-    if (taches.length === 0) {
-        doc.text('• —', 20, y);
-        y += 6;
-    } else {
-        taches.forEach((t) => {
-            const lines = doc.splitTextToSize(`• ${t}`, 170);
-            lines.forEach((line, li) => {
+    /** Contenu d'une section : thème = '•', tâche ('- ') = 'o' indenté. */
+    const renderSectionBody = (texte) => {
+        doc.setFontSize(10);
+        doc.setTextColor(0);
+        const lignes = (texte || '').split('\n').map((l) => l.trim()).filter(Boolean);
+        if (lignes.length === 0) {
+            doc.setFont('helvetica', 'normal');
+            pageGuard();
+            doc.text('• —', MARGIN_L + 6, y);
+            y += 5.5;
+            return;
+        }
+        lignes.forEach((ligne) => {
+            const isTask = /^-\s*/.test(ligne);
+            const contenu = ligne.replace(/^-\s*/, '').replace(/^[•o]\s*/, '');
+            const bullet = isTask ? 'o' : '•';
+            const x = isTask ? MARGIN_L + 12 : MARGIN_L + 6;
+            doc.setFont('helvetica', isTask ? 'normal' : 'bold');
+            const wrapped = doc.splitTextToSize(`${bullet}  ${contenu}`, MARGIN_R - x);
+            wrapped.forEach((line, li) => {
                 pageGuard();
-                doc.text(line, li === 0 ? 20 : 23, y);
-                y += 6;
+                doc.text(line, li === 0 ? x : x + 4, y);
+                y += 5.5;
             });
         });
+    };
+
+    /** Ligne de titre d'un BC : « BC {ref} : {designation} ({jours} JH) », JH surligné. */
+    const renderBcHeader = (b) => {
+        pageGuard(265);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(0);
+        const jh = `(${fmt(b.jours)} JH)`;
+        const wJh = doc.getTextWidth(jh);
+        const prefix = `BC ${b.reference || '—'} : ${b.designation || '—'} `;
+        const wrapped = doc.splitTextToSize(prefix, MARGIN_R - MARGIN_L - wJh - 4);
+        wrapped.forEach((line, li) => {
+            pageGuard(265);
+            doc.text(line, MARGIN_L, y);
+            if (li === wrapped.length - 1) {
+                // « (x JH) » en surbrillance jaune à la suite de la dernière ligne
+                const xJh = MARGIN_L + doc.getTextWidth(line) + 1.5;
+                doc.setFillColor(255, 240, 130);
+                doc.rect(xJh - 1, y - 3.8, wJh + 2, 5.4, 'F');
+                doc.text(jh, xJh, y);
+            }
+            y += 6;
+        });
+        y += 1;
+    };
+
+    const renderGroupe = (titre, items) => {
+        if (items.length === 0) return;
+        pageGuard(260);
+        underlinedText(`${titre} :`, MARGIN_L);
+        y += 8;
+        items.forEach((b) => {
+            renderBcHeader(b);
+            renderSectionBody(sections[b.reference]);
+            y += 4;
+        });
+        y += 2;
+    };
+
+    if (bdcs.length > 0) {
+        renderGroupe('RUN', bdcs.filter((b) => b.nature === 'RUN'));
+        renderGroupe('PROJET', bdcs.filter((b) => b.nature !== 'RUN'));
+    } else {
+        // Aucun BC : section unique (texte legacy ou sections orphelines)
+        pageGuard(260);
+        underlinedText('Tâches réalisées :', MARGIN_L);
+        y += 8;
+        const texte = isLegacy
+            ? (ra.tachesRealisees || '').trim()
+            : Object.values(sections).join('\n');
+        renderSectionBody(texte);
+        y += 4;
     }
-    y += 16;
 
     // ---------- SIGNATURES ----------
+    y += 10;
     if (y > 240) { doc.addPage(); y = 30; }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
     doc.setTextColor(CDG_BLUE);
-    doc.text('Responsable', 40, y, { align: 'center' });
+    doc.text('Responsable', 45, y, { align: 'center' });
     doc.text('Consultant', 160, y, { align: 'center' });
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(0);
+    doc.text('Ahmed Amine FARIZ', 45, y + 5, { align: 'center' });
     doc.text(String(ra.consultantNom || ''), 160, y + 5, { align: 'center' });
 
     if (ra.signatureResponsable) {
-        try { doc.addImage(ra.signatureResponsable, 'PNG', 20, y + 8, 40, 18); } catch (e) { /* signature illisible */ }
+        try { doc.addImage(ra.signatureResponsable, 'PNG', 25, y + 8, 40, 18); } catch (e) { /* signature illisible */ }
     }
     if (ra.signatureConsultant) {
         try { doc.addImage(ra.signatureConsultant, 'PNG', 140, y + 8, 40, 18); } catch (e) { /* signature illisible */ }

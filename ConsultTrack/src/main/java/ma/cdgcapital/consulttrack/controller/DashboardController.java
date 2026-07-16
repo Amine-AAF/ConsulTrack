@@ -80,6 +80,28 @@ public class DashboardController {
         return ResponseEntity.ok(EntityMapper.toDto(dashboardService.saveCabinet(cabinet)));
     }
 
+    @PutMapping("/admin/cabinets/{id}")
+    public ResponseEntity<CabinetDTO> updateCabinet(@PathVariable Long id, @RequestBody Cabinet cabinet) {
+        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.updateCabinet(id, cabinet)));
+    }
+
+    @DeleteMapping("/admin/cabinets/{id}")
+    public ResponseEntity<Void> deleteCabinet(@PathVariable Long id) {
+        dashboardService.deleteCabinet(id);
+        return ResponseEntity.ok().build();
+    }
+
+    @PutMapping("/admin/consultants/{id}")
+    public ResponseEntity<ConsultantDTO> updateConsultant(@PathVariable Long id, @RequestBody Consultant consultant) {
+        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.updateConsultant(id, consultant)));
+    }
+
+    @DeleteMapping("/admin/consultants/{id}")
+    public ResponseEntity<Void> deleteConsultant(@PathVariable Long id) {
+        dashboardService.deleteConsultant(id);
+        return ResponseEntity.ok().build();
+    }
+
     // --- CONSULTANTS ---
     @GetMapping("/admin/consultants")
     public ResponseEntity<List<ConsultantDTO>> getAllConsultants() {

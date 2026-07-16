@@ -3,6 +3,7 @@ import api from '../api/axiosConfig';
 import {
     Building2, Users, FileStack, ShieldCheck, Landmark,
     CalendarDays, Plus, Trash2, AlertCircle, KeyRound, Mail,
+    Pencil, X, Save,
 } from 'lucide-react';
 import {
     PageHeader, Button, Tabs, Card, BudgetGauge, COLORS,
@@ -109,26 +110,52 @@ const AdminPanel = ({ userRole }) => {
 const CabinetSection = ({ cabinets, onRefresh }) => {
     const emptyForm = { nom: '', adresse: '', ice: '', identifiantFiscal: '', patente: '', rib: '' };
     const [form, setForm] = useState(emptyForm);
+    const [editingId, setEditingId] = useState(null);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
+
+    const startEdit = (c) => {
+        setEditingId(c.id);
+        setForm({
+            nom: c.nom || '', adresse: c.adresse || '', ice: c.ice || '',
+            identifiantFiscal: c.identifiantFiscal || '', patente: c.patente || '', rib: c.rib || '',
+        });
+        setError('');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const cancelEdit = () => { setEditingId(null); setForm(emptyForm); setError(''); };
 
     const save = async () => {
         setError('');
         if (!form.nom.trim()) { setError('La raison sociale est obligatoire.'); return; }
         setSaving(true);
         try {
-            await api.post('/admin/cabinets', form);
+            if (editingId) await api.put(`/admin/cabinets/${editingId}`, form);
+            else await api.post('/admin/cabinets', form);
             setForm(emptyForm);
+            setEditingId(null);
             onRefresh();
         } catch (err) { setError(getErr(err)); }
         setSaving(false);
+    };
+
+    const remove = async (c) => {
+        if (!window.confirm(`Supprimer le cabinet « ${c.nom} » ?`)) return;
+        setError('');
+        try {
+            await api.delete(`/admin/cabinets/${c.id}`);
+            if (editingId === c.id) cancelEdit();
+            onRefresh();
+        } catch (err) { setError(getErr(err)); }
     };
 
     return (
         <div className="space-y-6">
             <Card>
                 <h3 className="font-black mb-4 flex items-center gap-2" style={{ color: COLORS.blue }}>
-                    <Landmark size={18} style={{ color: COLORS.green }} /> Nouveau cabinet (ESN)
+                    <Landmark size={18} style={{ color: COLORS.green }} />
+                    {editingId ? 'Modifier le cabinet' : 'Nouveau cabinet (ESN)'}
                 </h3>
                 <ErrorBanner message={error} />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -145,10 +172,16 @@ const CabinetSection = ({ cabinets, onRefresh }) => {
                     <input className={inputCls} placeholder="RIB" value={form.rib}
                            onChange={e => setForm({ ...form, rib: e.target.value })} />
                 </div>
-                <div className="mt-4">
+                <div className="mt-4 flex flex-wrap gap-3">
                     <Button onClick={save} disabled={saving}>
-                        <Plus size={16} /> Enregistrer le cabinet
+                        {editingId ? <Save size={16} /> : <Plus size={16} />}
+                        {editingId ? 'Enregistrer les modifications' : 'Enregistrer le cabinet'}
                     </Button>
+                    {editingId && (
+                        <Button variant="outline" onClick={cancelEdit}>
+                            <X size={16} /> Annuler
+                        </Button>
+                    )}
                 </div>
             </Card>
 
@@ -166,11 +199,12 @@ const CabinetSection = ({ cabinets, onRefresh }) => {
                             <th className="p-3">IF</th>
                             <th className="p-3">Patente</th>
                             <th className="p-3">RIB</th>
+                            <th className="p-3 text-right">Actions</th>
                         </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
                         {cabinets.length === 0 ? (
-                            <tr><td colSpan="6" className="p-6 text-center text-gray-400 italic">Aucun cabinet référencé.</td></tr>
+                            <tr><td colSpan="7" className="p-6 text-center text-gray-400 italic">Aucun cabinet référencé.</td></tr>
                         ) : cabinets.map(c => (
                             <tr key={c.id} className="hover:bg-gray-50">
                                 <td className="p-3 font-bold" style={{ color: COLORS.blue }}>{c.nom}</td>
@@ -179,6 +213,16 @@ const CabinetSection = ({ cabinets, onRefresh }) => {
                                 <td className="p-3 text-gray-500 font-mono">{c.identifiantFiscal || '—'}</td>
                                 <td className="p-3 text-gray-500 font-mono">{c.patente || '—'}</td>
                                 <td className="p-3 text-gray-500 font-mono">{c.rib || '—'}</td>
+                                <td className="p-3">
+                                    <div className="flex justify-end gap-2">
+                                        <Button variant="outline" onClick={() => startEdit(c)}>
+                                            <Pencil size={14} /> Modifier
+                                        </Button>
+                                        <Button variant="danger" onClick={() => remove(c)}>
+                                            <Trash2 size={14} /> Supprimer
+                                        </Button>
+                                    </div>
+                                </td>
                             </tr>
                         ))}
                         </tbody>
@@ -195,10 +239,14 @@ const CabinetSection = ({ cabinets, onRefresh }) => {
 const UserSection = ({ consultants, cabinets, onRefresh }) => {
     const emptyForm = { nom: '', prenom: '', email: '', password: '', role: 'CONSULTANT', cabinetId: '', cabinetsGeresIds: [] };
     const [form, setForm] = useState(emptyForm);
+    const [editingId, setEditingId] = useState(null);
+    // En édition : n'écrase les cabinets gérés que si la sélection a été modifiée
+    const [geresTouched, setGeresTouched] = useState(false);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
 
     const toggleCabinetGere = (id) => {
+        setGeresTouched(true);
         setForm(f => ({
             ...f,
             cabinetsGeresIds: f.cabinetsGeresIds.includes(id)
@@ -207,10 +255,37 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
         }));
     };
 
+    const startEdit = (c) => {
+        setEditingId(c.id);
+        setForm({
+            nom: c.nom || '',
+            prenom: c.prenom || '',
+            email: c.email || '',
+            password: '',
+            role: c.role || 'CONSULTANT',
+            cabinetId: c.cabinet?.id != null ? String(c.cabinet.id) : '',
+            cabinetsGeresIds: [],
+        });
+        setGeresTouched(false);
+        setError('');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const cancelEdit = () => {
+        setEditingId(null);
+        setForm(emptyForm);
+        setGeresTouched(false);
+        setError('');
+    };
+
     const save = async () => {
         setError('');
-        if (!form.nom.trim() || !form.prenom.trim() || !form.email.trim() || !form.password) {
-            setError('Nom, prénom, email et mot de passe sont obligatoires.');
+        if (!form.nom.trim() || !form.prenom.trim() || !form.email.trim()) {
+            setError('Nom, prénom et email sont obligatoires.');
+            return;
+        }
+        if (!editingId && !form.password) {
+            setError('Le mot de passe est obligatoire à la création.');
             return;
         }
         if (form.role === 'CONSULTANT' && !form.cabinetId) {
@@ -219,26 +294,48 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
         }
         setSaving(true);
         try {
-            await api.post('/admin/consultants', {
+            const payload = {
                 nom: form.nom,
                 prenom: form.prenom,
                 email: form.email,
-                password: form.password,
                 role: form.role,
                 cabinet: form.cabinetId ? { id: parseInt(form.cabinetId, 10) } : null,
-                cabinetsGeresIds: form.role === 'RESPONSABLE' ? form.cabinetsGeresIds : [],
-            });
+            };
+            if (form.password) payload.password = form.password; // vide en édition = conservé
+            if (editingId) {
+                if (form.role === 'RESPONSABLE' && geresTouched) {
+                    payload.cabinetsGeresIds = form.cabinetsGeresIds;
+                }
+                await api.put(`/admin/consultants/${editingId}`, payload);
+            } else {
+                payload.cabinetsGeresIds = form.role === 'RESPONSABLE' ? form.cabinetsGeresIds : [];
+                await api.post('/admin/consultants', payload);
+            }
             setForm(emptyForm);
+            setEditingId(null);
+            setGeresTouched(false);
             onRefresh();
         } catch (err) { setError(getErr(err)); }
         setSaving(false);
+    };
+
+    const remove = async (c) => {
+        if (!window.confirm(`Supprimer l'utilisateur « ${c.nom} ${c.prenom || ''} » ?`)) return;
+        setError('');
+        try {
+            await api.delete(`/admin/consultants/${c.id}`);
+            if (editingId === c.id) cancelEdit();
+            onRefresh();
+        } catch (err) { setError(getErr(err)); }
     };
 
     return (
         <div className="space-y-6">
             <Card>
                 <h3 className="font-black mb-4 flex items-center gap-2" style={{ color: COLORS.blue }}>
-                    <Plus size={18} style={{ color: COLORS.green }} /> Nouvel utilisateur
+                    {editingId
+                        ? <><Pencil size={18} style={{ color: COLORS.green }} /> Modifier l'utilisateur</>
+                        : <><Plus size={18} style={{ color: COLORS.green }} /> Nouvel utilisateur</>}
                 </h3>
                 <ErrorBanner message={error} />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -248,7 +345,9 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
                            onChange={e => setForm({ ...form, prenom: e.target.value })} />
                     <input className={inputCls} type="email" placeholder="Email *" value={form.email}
                            onChange={e => setForm({ ...form, email: e.target.value })} />
-                    <input className={inputCls} type="password" placeholder="Mot de passe *" value={form.password}
+                    <input className={inputCls} type="password"
+                           placeholder={editingId ? 'Nouveau mot de passe (laisser vide pour conserver)' : 'Mot de passe *'}
+                           value={form.password}
                            onChange={e => setForm({ ...form, password: e.target.value })} />
                     <select className={inputCls} value={form.role}
                             onChange={e => setForm({ ...form, role: e.target.value })}>
@@ -269,6 +368,11 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
                     <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
                         <div className="text-[11px] uppercase font-black tracking-wider text-gray-400 mb-3">
                             Cabinets gérés
+                            {editingId && !geresTouched && (
+                                <span className="normal-case font-bold text-gray-400 ml-2">
+                                    (sélection inchangée = cabinets gérés actuels conservés)
+                                </span>
+                            )}
                         </div>
                         {cabinets.length === 0 ? (
                             <div className="text-sm text-gray-400 italic">Aucun cabinet disponible.</div>
@@ -291,10 +395,16 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
                     </div>
                 )}
 
-                <div className="mt-4">
+                <div className="mt-4 flex flex-wrap gap-3">
                     <Button onClick={save} disabled={saving}>
-                        <Plus size={16} /> Créer l'utilisateur
+                        {editingId ? <Save size={16} /> : <Plus size={16} />}
+                        {editingId ? 'Enregistrer les modifications' : "Créer l'utilisateur"}
                     </Button>
+                    {editingId && (
+                        <Button variant="outline" onClick={cancelEdit}>
+                            <X size={16} /> Annuler
+                        </Button>
+                    )}
                 </div>
             </Card>
 
@@ -310,11 +420,12 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
                             <th className="p-3">Email</th>
                             <th className="p-3">Rôle</th>
                             <th className="p-3">Cabinet</th>
+                            <th className="p-3 text-right">Actions</th>
                         </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
                         {consultants.length === 0 ? (
-                            <tr><td colSpan="4" className="p-6 text-center text-gray-400 italic">Aucun utilisateur.</td></tr>
+                            <tr><td colSpan="5" className="p-6 text-center text-gray-400 italic">Aucun utilisateur.</td></tr>
                         ) : consultants.map(c => (
                             <tr key={c.id} className="hover:bg-gray-50">
                                 <td className="p-3 font-bold" style={{ color: COLORS.blue }}>
@@ -325,6 +436,16 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
                                 </td>
                                 <td className="p-3"><RoleBadge role={c.role} /></td>
                                 <td className="p-3 text-gray-500 font-bold">{c.cabinet?.nom || '—'}</td>
+                                <td className="p-3">
+                                    <div className="flex justify-end gap-2">
+                                        <Button variant="outline" onClick={() => startEdit(c)}>
+                                            <Pencil size={14} /> Modifier
+                                        </Button>
+                                        <Button variant="danger" onClick={() => remove(c)}>
+                                            <Trash2 size={14} /> Supprimer
+                                        </Button>
+                                    </div>
+                                </td>
                             </tr>
                         ))}
                         </tbody>
@@ -339,7 +460,7 @@ const UserSection = ({ consultants, cabinets, onRefresh }) => {
    3. BONS DE COMMANDE
    ========================================== */
 const BCSection = ({ bcs, consultants, onRefresh }) => {
-    const emptyForm = { reference: '', joursMax: '', tjm: '', codeBudget: '', designation: '', consultantId: '' };
+    const emptyForm = { reference: '', joursMax: '', tjm: '', codeBudget: '', designation: '', consultantId: '', nature: 'RUN' };
     const [form, setForm] = useState(emptyForm);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
@@ -359,6 +480,7 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
                 codeBudget: form.codeBudget,
                 designation: form.designation,
                 consultantId: parseInt(form.consultantId, 10),
+                nature: form.nature,
             });
             setForm(emptyForm);
             onRefresh();
@@ -391,6 +513,11 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
                         <option value="">Consultant *</option>
                         {consultantsOnly.map(c => <option key={c.id} value={c.id}>{c.nom} {c.prenom}</option>)}
                     </select>
+                    <select className={inputCls} value={form.nature}
+                            onChange={e => setForm({ ...form, nature: e.target.value })}>
+                        <option value="RUN">Nature : RUN</option>
+                        <option value="PROJET">Nature : PROJET</option>
+                    </select>
                 </div>
                 <div className="mt-4">
                     <Button onClick={save} disabled={saving}>
@@ -405,7 +532,17 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
                 ) : bcs.map(bc => (
                     <Card key={bc.id}>
                         <div className="flex justify-between items-start mb-1">
-                            <div className="font-black text-lg" style={{ color: COLORS.blue }}>{bc.reference}</div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <div className="font-black text-lg" style={{ color: COLORS.blue }}>{bc.reference}</div>
+                                {bc.nature && (
+                                    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full"
+                                          style={bc.nature === 'RUN'
+                                              ? { backgroundColor: '#e0e7ff', color: '#4338ca' }
+                                              : { backgroundColor: '#dcfce7', color: '#15803d' }}>
+                                        {bc.nature}
+                                    </span>
+                                )}
+                            </div>
                             {bc.tjm != null && (
                                 <span className="text-[11px] font-black px-2 py-1 rounded-full"
                                       style={{ backgroundColor: '#fdf6e9', color: COLORS.gold }}>

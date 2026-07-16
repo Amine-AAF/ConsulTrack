@@ -63,6 +63,7 @@ public class RapportActiviteService {
         // BDC utilisés : tout BC ayant une consommation validée dans l'année,
         // avec la somme du mois demandé (éventuellement 0.0)
         Map<String, Double> joursParBc = new LinkedHashMap<>();
+        Map<String, ma.cdgcapital.consulttrack.model.BonDeCommande> bcParReference = new LinkedHashMap<>();
         double totalJH = 0.0;
         Set<String> suggestions = new LinkedHashSet<>();
 
@@ -71,6 +72,7 @@ public class RapportActiviteService {
             if (reference == null || reference.isBlank()) {
                 reference = "BC #" + t.getBonDeCommande().getId();
             }
+            bcParReference.putIfAbsent(reference, t.getBonDeCommande());
             boolean duMois = YearMonth.from(t.getDate()).equals(ym);
             joursParBc.merge(reference, duMois ? t.getDuree() : 0.0, Double::sum);
 
@@ -88,6 +90,18 @@ public class RapportActiviteService {
             RaBdcUtiliseDTO bdc = new RaBdcUtiliseDTO();
             bdc.setReference(entry.getKey());
             bdc.setJours(entry.getValue());
+            ma.cdgcapital.consulttrack.model.BonDeCommande b = bcParReference.get(entry.getKey());
+            if (b != null) {
+                bdc.setDesignation(b.getDesignation());
+                // Nature du BC ; à défaut, déduite de la désignation (run/maintenance/support → RUN)
+                if (b.getNature() != null) {
+                    bdc.setNature(b.getNature().name());
+                } else {
+                    String d = (b.getDesignation() != null ? b.getDesignation() : "").toLowerCase();
+                    bdc.setNature(d.contains("run") || d.contains("maintenance") || d.contains("support")
+                            ? "RUN" : "PROJET");
+                }
+            }
             bdcUtilises.add(bdc);
         }
 

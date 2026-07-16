@@ -23,6 +23,10 @@ public class BonDeCommande {
     @Enumerated(EnumType.STRING)
     private StatutBC statut;
 
+    /** Nature du BC : chaque BC est soit RUN soit PROJET (regroupement des RA). */
+    @Enumerated(EnumType.STRING)
+    private NatureActivite nature;
+
     @Column(name = "montant_consomme")
     private Double montantConsomme = 0.0;
 

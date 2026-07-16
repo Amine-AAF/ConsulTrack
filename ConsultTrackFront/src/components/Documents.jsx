@@ -49,6 +49,51 @@ const contenuJour = (j) => {
     }
 };
 
+/* ================================================================
+   Sérialisation des sections du Rapport d'Activité (une par BC).
+   Format stocké (un seul champ TEXT côté entité) :
+       @@BC:{reference}@@\n{texte de la section}
+   sections non vides jointes par '\n'.
+   Convention dans une section : ligne sans '-' initial = THÈME,
+   ligne commençant par '- ' = tâche du thème.
+   ================================================================ */
+const GENERAL_KEY = '__GENERAL__';
+const BC_MARKER_RE = /@@BC:(.+?)@@/;
+
+/** Découpe le texte stocké en { reference → texte de section }. */
+const parseSectionsRa = (texte, bdcs) => {
+    const map = {};
+    (bdcs || []).forEach((b) => { map[b.reference] = ''; });
+    const txt = texte || '';
+    if (!txt.trim()) {
+        if (!bdcs || bdcs.length === 0) map[GENERAL_KEY] = '';
+        return map;
+    }
+    if (!BC_MARKER_RE.test(txt)) {
+        // Texte legacy sans marqueurs : 1er BC (ou section « Général »)
+        if (bdcs && bdcs.length > 0) map[bdcs[0].reference] = txt.trim();
+        else map[GENERAL_KEY] = txt.trim();
+        return map;
+    }
+    const parts = txt.split(/@@BC:(.+?)@@/); // [avant, ref1, txt1, ref2, txt2, ...]
+    for (let i = 1; i < parts.length; i += 2) {
+        const ref = parts[i];
+        const body = (parts[i + 1] || '').replace(/^\n/, '').replace(/\s+$/, '');
+        map[ref] = body;
+    }
+    if ((!bdcs || bdcs.length === 0) && Object.keys(map).length === 0) map[GENERAL_KEY] = '';
+    return map;
+};
+
+/** Reconstruit le champ TEXT à partir des sections non vides. */
+const serializeSectionsRa = (sections) =>
+    Object.entries(sections || {})
+        .filter(([, txt]) => txt && txt.trim())
+        .map(([ref, txt]) => (ref === GENERAL_KEY
+            ? txt.trim() // pas de BC : texte brut (compatible legacy)
+            : `@@BC:${ref}@@\n${txt.trim()}`))
+        .join('\n');
+
 const Documents = ({ userRole, userId }) => {
     const isConsultant = userRole === 'CONSULTANT';
     const currentYear = new Date().getFullYear();
@@ -66,7 +111,7 @@ const Documents = ({ userRole, userId }) => {
     const [tab, setTab] = useState('rpi');
     const [rpi, setRpi] = useState(null);
     const [ra, setRa] = useState(null);
-    const [tachesRealisees, setTachesRealisees] = useState('');
+    const [raSections, setRaSections] = useState({}); // { reference BC → texte de section }
 
     // ---- États UI ----
     const [loadingList, setLoadingList] = useState(false);
@@ -122,7 +167,7 @@ const Documents = ({ userRole, userId }) => {
         api.get('/rapports/activite', { params: { consultantId, annee, mois: selectedMois } })
             .then((res) => {
                 setRa(res.data);
-                setTachesRealisees(res.data?.tachesRealisees || '');
+                setRaSections(parseSectionsRa(res.data?.tachesRealisees, res.data?.bdcUtilises));
             })
             .catch(() => setError("Erreur lors du chargement du rapport d'activité."))
             .finally(() => setLoadingDetail(false));
@@ -134,11 +179,15 @@ const Documents = ({ userRole, userId }) => {
         else loadRa();
     }, [tab, loadRpi, loadRa]);
 
-    // Suggestion des tâches depuis les saisies
+    // Suggestion des tâches depuis les saisies (ajoutées à la 1re section)
     const suggererTaches = () => {
-        const suggestions = (ra?.tachesSuggerees || []).map((t) => `• ${t}`);
+        const suggestions = (ra?.tachesSuggerees || []).map((t) => `- ${t}`);
         if (suggestions.length === 0) return;
-        setTachesRealisees((prev) => (prev ? prev.trimEnd() + '\n' : '') + suggestions.join('\n'));
+        setRaSections((prev) => {
+            const firstKey = (ra?.bdcUtilises?.[0]?.reference) || Object.keys(prev)[0] || GENERAL_KEY;
+            const cur = prev[firstKey] || '';
+            return { ...prev, [firstKey]: (cur ? cur.trimEnd() + '\n' : '') + suggestions.join('\n') };
+        });
     };
 
     // Enregistrer / soumettre le RA
@@ -155,7 +204,7 @@ const Documents = ({ userRole, userId }) => {
             consultantId,
             annee,
             mois: selectedMois,
-            tachesRealisees,
+            tachesRealisees: serializeSectionsRa(raSections),
             statut,
         })
             .then(() => {
@@ -358,6 +407,25 @@ const Documents = ({ userRole, userId }) => {
     // ================================================================
     const renderRa = () => {
         if (!ra) return null;
+
+        // Groupes RUN / PROJET (par nature du BC ; nature inconnue → PROJET)
+        const bdcs = ra.bdcUtilises || [];
+        const groupesBdc = [
+            { titre: 'RUN', items: bdcs.filter((b) => b.nature === 'RUN') },
+            { titre: 'PROJET', items: bdcs.filter((b) => b.nature !== 'RUN') },
+        ].filter((g) => g.items.length > 0);
+
+        const renderSectionTextarea = (refKey) => (
+            <textarea
+                value={raSections[refKey] || ''}
+                onChange={(e) => setRaSections((prev) => ({ ...prev, [refKey]: e.target.value }))}
+                disabled={raReadOnly}
+                rows={5}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white disabled:bg-gray-50 disabled:text-gray-500"
+                placeholder={'Ligne sans tiret = thème, ligne "- " = tâche du thème, ex. :\nMEGARA\n- Développement du module de facturation\n- Correction des anomalies de pointage'}
+            />
+        );
+
         return (
             <div className="space-y-5">
                 {/* En-tête */}
@@ -374,9 +442,9 @@ const Documents = ({ userRole, userId }) => {
                     <div className="flex items-center gap-3">
                         <span className="text-xs font-black px-3 py-1.5 rounded-lg"
                               style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>
-                            Total {fmt(ra.totalJH)} JH
+                            Total JH : {fmt(ra.totalJH)} — cohérent RPI ✓
                         </span>
-                        <Button onClick={() => generateRaPDF({ ...ra, tachesRealisees })}>
+                        <Button onClick={() => generateRaPDF({ ...ra, tachesRealisees: serializeSectionsRa(raSections) })}>
                             <Download size={16} /> Exporter PDF
                         </Button>
                     </div>
@@ -393,27 +461,7 @@ const Documents = ({ userRole, userId }) => {
                     </div>
                 )}
 
-                {/* BDC utilisés */}
-                <Card>
-                    <h3 className="text-xs uppercase font-black text-gray-400 tracking-wider mb-3">
-                        BDC Utilisés
-                    </h3>
-                    {(!ra.bdcUtilises || ra.bdcUtilises.length === 0) ? (
-                        <p className="text-sm text-gray-400 py-2">Aucun BDC utilisé pour ce mois.</p>
-                    ) : (
-                        <ul className="space-y-1.5">
-                            {ra.bdcUtilises.map((b, bi) => (
-                                <li key={bi} className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS.gold }} />
-                                    <span className="font-black" style={{ color: COLORS.blue }}>{b.reference}</span>
-                                    <span>: {fmt(b.jours)} Jours</span>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </Card>
-
-                {/* Tâches réalisées */}
+                {/* Tâches réalisées — une section par BC, groupées RUN / PROJET */}
                 <Card className="space-y-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <h3 className="text-xs uppercase font-black text-gray-400 tracking-wider">
@@ -431,14 +479,40 @@ const Documents = ({ userRole, userId }) => {
                         )}
                     </div>
 
-                    <textarea
-                        value={tachesRealisees}
-                        onChange={(e) => setTachesRealisees(e.target.value)}
-                        disabled={raReadOnly}
-                        rows={10}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-500"
-                        placeholder={'Une tâche par ligne, ex. :\n• Développement du module de facturation\n• Correction des anomalies de pointage'}
-                    />
+                    {/* Bandeau total JH (issu du pointage validé) */}
+                    <div className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-black"
+                         style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>
+                        <CheckCircle2 size={15} /> Total JH : {fmt(ra.totalJH)} — cohérent RPI ✓
+                    </div>
+
+                    {groupesBdc.length === 0 ? (
+                        <div className="space-y-2">
+                            <div className="font-black text-sm" style={{ color: COLORS.blue }}>Général</div>
+                            {renderSectionTextarea(GENERAL_KEY)}
+                        </div>
+                    ) : groupesBdc.map((g) => (
+                        <div key={g.titre} className="space-y-3">
+                            <h4 className="text-xs uppercase font-black tracking-wider border-b border-gray-100 pb-1"
+                                style={{ color: COLORS.blue }}>
+                                {g.titre}
+                            </h4>
+                            {g.items.map((b) => (
+                                <div key={b.reference} className="border border-gray-100 rounded-xl p-4 space-y-2 bg-gray-50/50">
+                                    <div className="font-black text-sm" style={{ color: COLORS.blue }}>
+                                        BC {b.reference} : {b.designation || '—'}{' '}
+                                        <span className="text-[11px] font-black px-2 py-0.5 rounded-full align-middle"
+                                              style={{ backgroundColor: '#fef9c3', color: '#a16207' }}>
+                                            {fmt(b.jours)} JH
+                                        </span>
+                                    </div>
+                                    <p className="text-[11px] text-gray-400 font-semibold">
+                                        JH issus du pointage validé (cohérent RPI)
+                                    </p>
+                                    {renderSectionTextarea(b.reference)}
+                                </div>
+                            ))}
+                        </div>
+                    ))}
 
                     {/* Actions */}
                     <div className="flex flex-wrap items-center gap-3 pt-1">

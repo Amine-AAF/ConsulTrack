@@ -40,8 +40,10 @@ public class SecurityConfig {
                         // Endpoints publics
                         .requestMatchers("/api/auth/**", "/api/public/**").permitAll()
                         // ⚠ ORDRE CRITIQUE : les règles spécifiques DOIVENT précéder /api/admin/**
-                        // Création d'utilisateurs : ADMIN uniquement (anti-escalade de privilèges)
+                        // Gestion d'utilisateurs (création/modif/suppression) : ADMIN uniquement (anti-escalade)
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/admin/consultants").hasRole("ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/admin/consultants/**").hasRole("ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/api/admin/consultants/**").hasRole("ADMIN")
                         // Gestion des jours fériés : ADMIN uniquement
                         .requestMatchers("/api/admin/jours-feries/**").hasRole("ADMIN")
                         // Le reste de l'admin (validation, référentiel) : ADMIN + RESPONSABLE

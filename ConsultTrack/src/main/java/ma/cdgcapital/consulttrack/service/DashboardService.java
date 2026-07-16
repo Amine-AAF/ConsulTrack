@@ -305,6 +305,68 @@ public class DashboardService {
     public List<Cabinet> getAllCabinets() { return cabinetRepository.findAll(); }
     public Cabinet saveCabinet(Cabinet cabinet) { return cabinetRepository.save(cabinet); }
 
+    @Transactional
+    public Cabinet updateCabinet(Long id, Cabinet maj) {
+        Cabinet c = cabinetRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Cabinet introuvable: " + id));
+        if (maj.getNom() != null) c.setNom(maj.getNom());
+        c.setAdresse(maj.getAdresse());
+        c.setIce(maj.getIce());
+        c.setIdentifiantFiscal(maj.getIdentifiantFiscal());
+        c.setPatente(maj.getPatente());
+        c.setRib(maj.getRib());
+        return cabinetRepository.save(c);
+    }
+
+    @Transactional
+    public void deleteCabinet(Long id) {
+        boolean utilise = consultantRepository.findAll().stream()
+                .anyMatch(c -> c.getCabinet() != null && c.getCabinet().getId().equals(id));
+        if (utilise) {
+            throw new BusinessException("Impossible de supprimer : des consultants sont rattachés à ce cabinet.");
+        }
+        cabinetRepository.deleteById(id);
+    }
+
+    @Transactional
+    public Consultant updateConsultant(Long id, Consultant maj) {
+        Consultant c = consultantRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Consultant introuvable: " + id));
+        if (maj.getNom() != null) c.setNom(maj.getNom());
+        if (maj.getPrenom() != null) c.setPrenom(maj.getPrenom());
+        if (maj.getEmail() != null && !maj.getEmail().isBlank()) c.setEmail(maj.getEmail());
+        if (maj.getRole() != null) c.setRole(maj.getRole());
+        if (maj.getCabinet() != null && maj.getCabinet().getId() != null) {
+            c.setCabinet(cabinetRepository.findById(maj.getCabinet().getId())
+                    .orElseThrow(() -> new BusinessException("Cabinet introuvable")));
+        }
+        if (maj.getPassword() != null && !maj.getPassword().isBlank()) {
+            c.setPassword(passwordEncoder.encode(maj.getPassword()));
+        }
+        if (maj.getCabinetsGeresIds() != null) {
+            java.util.Set<Cabinet> cabinets = new HashSet<>();
+            for (Long cid : maj.getCabinetsGeresIds()) {
+                cabinets.add(cabinetRepository.findById(cid)
+                        .orElseThrow(() -> new BusinessException("Cabinet introuvable: " + cid)));
+            }
+            c.setCabinetsGeres(cabinets);
+        }
+        return consultantRepository.save(c);
+    }
+
+    @Transactional
+    public void deleteConsultant(Long id) {
+        boolean aDesDonnees = !tacheRepository.findByConsultantId(id).isEmpty()
+                || !absenceRepository.findByConsultantId(id).isEmpty()
+                || bcRepository.findAll().stream()
+                    .anyMatch(b -> b.getConsultant() != null && b.getConsultant().getId().equals(id));
+        if (aDesDonnees) {
+            throw new BusinessException("Impossible de supprimer : ce consultant a des pointages, "
+                    + "absences ou BC. Supprimez/réaffectez d'abord ses données.");
+        }
+        consultantRepository.deleteById(id);
+    }
+
     public List<Consultant> getAllConsultants() { return consultantRepository.findAll(); }
 
     public Consultant saveConsultant(Consultant consultant) {

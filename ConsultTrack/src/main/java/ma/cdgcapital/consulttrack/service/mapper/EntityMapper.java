@@ -44,6 +44,7 @@ public final class EntityMapper {
                 bc.getJoursConsommes(), engages, max - engages,
                 bc.getMontantConsomme(),
                 bc.getStatut() != null ? bc.getStatut().name() : null,
+                bc.getNature() != null ? bc.getNature().name() : null,
                 bc.getConsultant() != null ? bc.getConsultant().getId() : null,
                 toRef(bc.getConsultant()));
     }

@@ -6,4 +6,6 @@ import lombok.Data;
 public class RaBdcUtiliseDTO {
     private String reference;
     private Double jours;
+    private String nature;      // RUN | PROJET (nature du BC)
+    private String designation; // désignation du BC (titre de section du RA)
 }
