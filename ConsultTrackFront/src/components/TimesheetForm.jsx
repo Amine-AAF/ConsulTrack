@@ -4,10 +4,11 @@ import {
     PageHeader, StatCard, Button, Card, BudgetGauge, COLORS,
 } from './ui';
 import {
-    CalendarCheck, ChevronLeft, ChevronRight, Save, Send, Lock,
+    CalendarCheck, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Save, Send, Lock,
     AlertTriangle, CheckCircle2, XCircle, Users, Palmtree, Wand2,
-    CalendarRange, Wrench, Briefcase,
+    CalendarRange, Wrench, Briefcase, FileText,
 } from 'lucide-react';
+import RaSaisieSection from './RaSaisieSection.jsx';
 
 /* ============================================================
    Ma Présence (RPI) — saisie mensuelle de présence par BC.
@@ -86,6 +87,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
     const [toast, setToast] = useState(null);
     const [missingDays, setMissingDays] = useState([]);
     const [refreshKey, setRefreshKey] = useState(0);
+    const [showRa, setShowRa] = useState(false); // encart Rapport d'Activité (replié par défaut)
 
     const notify = (type, message) => {
         setToast({ type, message });
@@ -836,6 +838,33 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                             </div>
                         </div>
                     </div>
+
+                    {/* ===== Rapport d'Activité du mois (encart repliable) ===== */}
+                    <Card>
+                        <button
+                            type="button"
+                            onClick={() => setShowRa((v) => !v)}
+                            className="w-full flex items-center justify-between gap-3 text-left"
+                            aria-expanded={showRa}
+                        >
+                            <div>
+                                <h3 className="text-sm font-black uppercase flex items-center gap-2" style={{ color: COLORS.blue }}>
+                                    <FileText size={16} /> Rapport d'Activité du mois
+                                </h3>
+                                <p className="text-xs text-gray-400 font-semibold mt-0.5">
+                                    Décrivez vos réalisations du mois — les JH par BC proviennent de votre pointage validé
+                                </p>
+                            </div>
+                            {showRa
+                                ? <ChevronUp size={18} className="shrink-0 text-gray-400" />
+                                : <ChevronDown size={18} className="shrink-0 text-gray-400" />}
+                        </button>
+                        {showRa && (
+                            <div className="mt-4">
+                                <RaSaisieSection consultantId={consultantId} annee={annee} mois={mois} compact />
+                            </div>
+                        )}
+                    </Card>
                 </>
             )}
 

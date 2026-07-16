@@ -169,6 +169,16 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
         return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
     }, [scopedRows]);
 
+    // --- Activité réalisée (ADMIN) : lignes groupées par consultant ---
+    const activiteParConsultant = useMemo(() => {
+        const groups = scopedRows.reduce((acc, r) => {
+            const key = r.nomConsultant || 'Inconnu';
+            (acc[key] = acc[key] || []).push(r);
+            return acc;
+        }, {});
+        return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+    }, [scopedRows]);
+
     const yearOptions = [];
     for (let y = new Date().getFullYear() - 2; y <= new Date().getFullYear() + 1; y++) yearOptions.push(y);
 
@@ -387,6 +397,71 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                         );
                     })}
                 </div>
+            )}
+
+            {/* ============ ADMIN : Activité réalisée par consultant / année / BC ============ */}
+            {isAdmin && activiteParConsultant.length > 0 && (
+                <Card className="mt-6">
+                    <h3 className="font-black text-lg flex items-center gap-2 mb-4" style={{ color: COLORS.blue }}>
+                        <LayoutDashboard size={20} style={{ color: COLORS.green }} /> Activité réalisée — {year}
+                    </h3>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-xs border-collapse min-w-[900px]">
+                            <thead>
+                                <tr className="border-b border-gray-200">
+                                    <th className="text-left text-[10px] uppercase font-black text-gray-400 py-2 px-2">Référence BC</th>
+                                    <th className="text-left text-[10px] uppercase font-black text-gray-400 py-2 px-2">Désignation</th>
+                                    {MOIS_COURTS.map((m) => (
+                                        <th key={m} className="text-center text-[10px] font-black text-gray-400 py-2 px-1">{m}</th>
+                                    ))}
+                                    <th className="text-right text-[10px] uppercase font-black text-gray-400 py-2 px-2">Total année</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {activiteParConsultant.map(([nomConsultant, bcRows]) => {
+                                    const totalMensuel = Array.from({ length: 12 }, (_, m) =>
+                                        bcRows.reduce((s, r) => s + (r.mensuel?.[m] || 0), 0));
+                                    const totalAnnee = bcRows.reduce((s, r) => s + (r.joursConsommesYTD || 0), 0);
+                                    return (
+                                        <React.Fragment key={nomConsultant}>
+                                            <tr className="border-t border-gray-100 bg-gray-50">
+                                                <td colSpan={15} className="py-2 px-2 font-black text-sm uppercase" style={{ color: COLORS.blue }}>
+                                                    {nomConsultant}
+                                                </td>
+                                            </tr>
+                                            {bcRows.map((r, i) => (
+                                                <tr key={`${r.bcId}-${i}`} className="border-t border-gray-50">
+                                                    <td className="py-1.5 px-2 font-bold" style={{ color: COLORS.blue }}>{r.referenceBC}</td>
+                                                    <td className="py-1.5 px-2 text-gray-500 font-semibold">{r.descriptionCodeBudgetaire || '—'}</td>
+                                                    {Array.from({ length: 12 }, (_, m) => {
+                                                        const v = r.mensuel?.[m] || 0;
+                                                        return (
+                                                            <td key={m} className="py-1.5 px-1 text-center text-gray-600">
+                                                                {v ? v.toLocaleString('fr-FR') : ''}
+                                                            </td>
+                                                        );
+                                                    })}
+                                                    <td className="py-1.5 px-2 text-right font-black" style={{ color: COLORS.gold }}>
+                                                        {(r.joursConsommesYTD || 0).toLocaleString('fr-FR')}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            <tr className="border-t border-gray-200 font-black" style={{ color: COLORS.blue }}>
+                                                <td className="py-1.5 px-2" colSpan={2}>Sous-total {nomConsultant}</td>
+                                                {totalMensuel.map((v, m) => (
+                                                    <td key={m} className="py-1.5 px-1 text-center">
+                                                        {v ? v.toLocaleString('fr-FR') : ''}
+                                                    </td>
+                                                ))}
+                                                <td className="py-1.5 px-2 text-right">{totalAnnee.toLocaleString('fr-FR')}</td>
+                                            </tr>
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </Card>
             )}
         </div>
     );
