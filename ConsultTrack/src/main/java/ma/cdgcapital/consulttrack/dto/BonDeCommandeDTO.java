@@ -27,6 +27,8 @@ public class BonDeCommandeDTO {
     private String statut;
     private String nature; // RUN | PROJET (déduite du code budgétaire R…/P…)
     private Integer anneeBudgetaire;
+    /** Reliquat consommable l'année suivante (null traité comme false). */
+    private Boolean reportReliquat;
     private Long consultantId;
     private ConsultantRefDTO consultant;
 }

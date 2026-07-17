@@ -35,6 +35,10 @@ public class BonDeCommande {
 
     /** Année budgétaire de rattachement du BC. */
     private Integer anneeBudgetaire;
+
+    /** Reliquat consommable sur l'année budgétaire suivante (décision admin/responsable). */
+    @Column(name = "report_reliquat")
+    private Boolean reportReliquat = false;
     private String designation;
     private Double tjm;
 

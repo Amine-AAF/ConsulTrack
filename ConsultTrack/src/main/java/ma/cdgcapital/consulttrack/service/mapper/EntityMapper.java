@@ -48,6 +48,7 @@ public final class EntityMapper {
                 bc.getStatut() != null ? bc.getStatut().name() : null,
                 bc.getNature() != null ? bc.getNature().name() : null,
                 bc.getAnneeBudgetaire(),
+                Boolean.TRUE.equals(bc.getReportReliquat()),
                 bc.getConsultant() != null ? bc.getConsultant().getId() : null,
                 toRef(bc.getConsultant()));
     }
