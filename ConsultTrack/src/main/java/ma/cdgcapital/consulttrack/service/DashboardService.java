@@ -84,6 +84,15 @@ public class DashboardService {
                 }
             }
 
+            // --- Rattachement à l'année demandée ---
+            // BC de l'année (ou sans année : compat, visible partout) → ligne normale.
+            // BC de l'année N-1 avec report autorisé → ligne « reliquat ».
+            Integer anneeBC = bc.getAnneeBudgetaire();
+            boolean ligneAnnee = anneeBC == null || anneeBC == annee;
+            boolean ligneReliquat = anneeBC != null && anneeBC == annee - 1
+                    && Boolean.TRUE.equals(bc.getReportReliquat());
+            if (!ligneAnnee && !ligneReliquat) continue;
+
             ConsultantDashboardDTO dto = new ConsultantDashboardDTO();
             Consultant cons = bc.getConsultant();
 
@@ -91,37 +100,52 @@ public class DashboardService {
             dto.setNomCabinet(cons.getCabinet() != null ? cons.getCabinet().getNom() : "Sans Cabinet");
             dto.setReferenceBC(bc.getReference());
             dto.setBcId(bc.getId());
-            dto.setTotalJoursBC(bc.getJoursMax());
             dto.setTjm(bc.getTjm());
             dto.setDescriptionCodeBudgetaire(bc.getCodeBudget());
 
+            // Toutes les tâches VALIDE du BC : conso de l'année demandée (mensuel)
+            // + conso des années antérieures (pour le calcul du reliquat).
             List<TacheRealisee> taches = tacheRepository.findByConsultantId(cons.getId()).stream()
                     .filter(t -> t.getBonDeCommande() != null
                             && t.getBonDeCommande().getId().equals(bc.getId())
                             && t.getDate() != null
-                            && t.getDate().getYear() == annee
                             && t.getStatut() == StatutPointage.VALIDE)
                     .collect(Collectors.toList());
 
-            Double totalYTD = 0.0;
+            double consoAnnee = 0.0;
+            double consoAnterieure = 0.0;
             Double[] mensuel = new Double[12];
             for (int i = 0; i < 12; i++) mensuel[i] = 0.0;
 
             for (TacheRealisee t : taches) {
                 if (t.getDuree() == null) continue;
-                int monthIdx = t.getDate().getMonthValue() - 1;
-                mensuel[monthIdx] += t.getDuree();
-                totalYTD += t.getDuree();
+                int y = t.getDate().getYear();
+                if (y == annee) {
+                    mensuel[t.getDate().getMonthValue() - 1] += t.getDuree();
+                    consoAnnee += t.getDuree();
+                } else if (y < annee) {
+                    consoAnterieure += t.getDuree();
+                }
             }
 
-            dto.setMensuel(mensuel);
-            dto.setJoursConsommesYTD(totalYTD);
-
             double max = bc.getJoursMax() != null ? bc.getJoursMax() : 0.0;
-            dto.setJoursRestants(max - totalYTD);
+            double enveloppe;
+            if (ligneReliquat) {
+                enveloppe = max - consoAnterieure; // reliquat calculé, jamais stocké
+                if (enveloppe <= 0) continue;      // rien à reporter → pas de ligne
+                dto.setReliquatAnneePrecedente(true);
+                dto.setAnneeOrigine(anneeBC);
+            } else {
+                enveloppe = max;
+            }
+
+            dto.setTotalJoursBC(enveloppe);
+            dto.setMensuel(mensuel);
+            dto.setJoursConsommesYTD(consoAnnee);
+            dto.setJoursRestants(enveloppe - consoAnnee);
 
             double tjm = bc.getTjm() != null ? bc.getTjm() : 0.0;
-            dto.setMontantConsommeYTD(totalYTD * tjm);
+            dto.setMontantConsommeYTD(consoAnnee * tjm);
             dto.setBudgetConsommeHT(dto.getMontantConsommeYTD());
 
             report.add(dto);

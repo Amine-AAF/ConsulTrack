@@ -25,4 +25,10 @@ public class ConsultantDashboardDTO {
     private Double budgetConsommeHT;
 
     private String descriptionCodeBudgetaire;
+
+    /** true si cette ligne est le reliquat reporté d'un BC de l'année précédente. */
+    private boolean reliquatAnneePrecedente = false;
+
+    /** Année budgétaire d'origine du BC (renseignée sur les lignes reliquat). */
+    private Integer anneeOrigine;
 }
