@@ -38,6 +38,11 @@ public class AuthService {
             throw new BadCredentialsException("Identifiants invalides");
         }
 
+        // Compte désactivé (fin de mission) : connexion refusée après vérification des identifiants
+        if (Boolean.FALSE.equals(c.getActif())) {
+            throw new BusinessException("Compte désactivé : mission terminée.");
+        }
+
         String token = jwtService.generateToken(c);
         AuthUserDTO user = new AuthUserDTO(
                 c.getId(), c.getNom(), c.getPrenom(), c.getEmail(),

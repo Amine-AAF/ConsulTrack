@@ -31,7 +31,9 @@ public final class EntityMapper {
         return new ConsultantDTO(
                 c.getId(), c.getNom(), c.getPrenom(), c.getEmail(),
                 c.getRole() != null ? c.getRole().name() : null,
-                toDto(c.getCabinet()));
+                toDto(c.getCabinet()),
+                c.getActif() == null ? Boolean.TRUE : c.getActif(),
+                c.getDateFinMission());
     }
 
     public static BonDeCommandeDTO toDto(BonDeCommande bc) {

@@ -94,7 +94,8 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
     useEffect(() => {
         if (isConsultant) { setConsultantId(String(userId ?? '')); return; }
         api.get('/admin/consultants')
-            .then((res) => setConsultants(res.data))
+            // Comptes inactifs (mission terminée) exclus de la saisie
+            .then((res) => setConsultants((res.data || []).filter((c) => c.actif !== false)))
             .catch(() => notify('error', 'Impossible de charger les consultants.'));
     }, [isConsultant, userId]);
 

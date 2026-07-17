@@ -43,6 +43,12 @@ public class Consultant {
             inverseJoinColumns = @JoinColumn(name = "cabinet_id"))
     private Set<Cabinet> cabinetsGeres = new HashSet<>();
 
+    /** Compte actif (false = mission terminée, connexion bloquée). null → considéré actif. */
+    private Boolean actif = true;
+
+    /** Date de fin de mission (renseignée quand actif = false). */
+    private java.time.LocalDate dateFinMission;
+
     /** Image de signature (data-URL base64) embarquée dans les PDF validés. */
     @JsonIgnore
     @Column(columnDefinition = "TEXT")

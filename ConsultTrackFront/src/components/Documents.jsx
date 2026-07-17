@@ -71,7 +71,8 @@ const Documents = ({ userRole, userId }) => {
     useEffect(() => {
         if (isConsultant) return;
         api.get('/admin/consultants')
-            .then((res) => setConsultants(res.data || []))
+            // Comptes inactifs (mission terminée) exclus du sélecteur
+            .then((res) => setConsultants((res.data || []).filter((c) => c.actif !== false)))
             .catch(() => setError('Impossible de charger la liste des consultants.'));
     }, [isConsultant]);
 

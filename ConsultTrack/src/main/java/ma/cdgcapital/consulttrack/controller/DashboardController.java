@@ -120,6 +120,28 @@ public class DashboardController {
                 dashboardService.updateConsultant(id, consultant, accessGuard.currentUser(auth))));
     }
 
+    /** Fin de mission : désactive le compte (body optionnel {"dateFin":"YYYY-MM-DD"}, défaut aujourd'hui). */
+    @PutMapping("/admin/consultants/{id}/terminer-mission")
+    public ResponseEntity<ConsultantDTO> terminerMission(@PathVariable Long id,
+                                                         @RequestBody(required = false) Map<String, String> body,
+                                                         Authentication auth) {
+        // RESPONSABLE : même périmètre que updateConsultant (CONSULTANT de ses cabinets gérés)
+        LocalDate dateFin = null;
+        if (body != null && body.get("dateFin") != null && !body.get("dateFin").isBlank()) {
+            dateFin = LocalDate.parse(body.get("dateFin"));
+        }
+        return ResponseEntity.ok(EntityMapper.toDto(
+                dashboardService.terminerMission(id, dateFin, accessGuard.currentUser(auth))));
+    }
+
+    /** Réactivation d'un compte désactivé (mission terminée). */
+    @PutMapping("/admin/consultants/{id}/reactiver")
+    public ResponseEntity<ConsultantDTO> reactiverConsultant(@PathVariable Long id, Authentication auth) {
+        // RESPONSABLE : même périmètre que updateConsultant
+        return ResponseEntity.ok(EntityMapper.toDto(
+                dashboardService.reactiverConsultant(id, accessGuard.currentUser(auth))));
+    }
+
     @DeleteMapping("/admin/consultants/{id}")
     public ResponseEntity<Void> deleteConsultant(@PathVariable Long id, Authentication auth) {
         // RESPONSABLE : cible CONSULTANT de son périmètre uniquement

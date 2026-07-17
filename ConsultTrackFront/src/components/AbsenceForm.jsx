@@ -28,7 +28,8 @@ const AbsenceForm = ({ userRole = 'CONSULTANT', userId = null }) => {
             const fetchConsultants = async () => {
                 try {
                     const res = await api.get('/admin/consultants');
-                    setConsultants(res.data);
+                    // Comptes inactifs (mission terminée) exclus de la saisie déléguée
+                    setConsultants((res.data || []).filter(c => c.actif !== false));
                 } catch (err) { console.error("Erreur chargement consultants", err); }
             };
             fetchConsultants();

@@ -449,6 +449,30 @@ public class DashboardService {
         return consultantRepository.save(c);
     }
 
+    /** Fin de mission : désactive le compte et fige la date de fin (périmètre identique à updateConsultant). */
+    @Transactional
+    public Consultant terminerMission(Long id, LocalDate dateFin, Consultant viewer) {
+        Consultant cible = consultantRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Consultant introuvable: " + id));
+        Set<Long> scope = cabinetScope(viewer);
+        if (scope != null) assertCibleGerable(cible, scope);
+        cible.setActif(false);
+        cible.setDateFinMission(dateFin != null ? dateFin : LocalDate.now());
+        return consultantRepository.save(cible);
+    }
+
+    /** Réactivation d'un compte dont la mission était terminée (périmètre identique à updateConsultant). */
+    @Transactional
+    public Consultant reactiverConsultant(Long id, Consultant viewer) {
+        Consultant cible = consultantRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Consultant introuvable: " + id));
+        Set<Long> scope = cabinetScope(viewer);
+        if (scope != null) assertCibleGerable(cible, scope);
+        cible.setActif(true);
+        cible.setDateFinMission(null);
+        return consultantRepository.save(cible);
+    }
+
     /** Suppression avec périmètre : un RESPONSABLE ne supprime que les CONSULTANT de ses cabinets. */
     @Transactional
     public void deleteConsultant(Long id, Consultant viewer) {

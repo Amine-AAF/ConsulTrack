@@ -20,4 +20,8 @@ public class ConsultantDTO {
     private String email;
     private String role;
     private CabinetDTO cabinet;
+    /** false = mission terminée (compte désactivé). null est normalisé à true côté mapper. */
+    private Boolean actif;
+    /** Date de fin de mission (ISO yyyy-MM-dd), null si actif. */
+    private java.time.LocalDate dateFinMission;
 }

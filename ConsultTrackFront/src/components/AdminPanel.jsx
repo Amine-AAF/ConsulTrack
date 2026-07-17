@@ -3,7 +3,7 @@ import api from '../api/axiosConfig';
 import {
     Building2, Users, FileStack, ShieldCheck, Landmark,
     CalendarDays, Plus, Trash2, AlertCircle, KeyRound, Mail,
-    Pencil, X, Save, Image as ImageIcon,
+    Pencil, X, Save, Image as ImageIcon, UserX, RotateCcw,
 } from 'lucide-react';
 import {
     PageHeader, Button, Tabs, Card, BudgetGauge, COLORS,
@@ -393,6 +393,29 @@ const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
         } catch (err) { setError(getErr(err)); }
     };
 
+    /** Fin de mission : désactive le compte (la connexion est bloquée côté serveur). */
+    const terminerMission = async (c) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const dateFin = window.prompt(
+            `Date de fin de mission de « ${c.nom} ${c.prenom || ''} » (AAAA-MM-JJ) :`, today);
+        if (dateFin === null) return; // annulé
+        setError('');
+        try {
+            await api.put(`/admin/consultants/${c.id}/terminer-mission`,
+                { dateFin: dateFin.trim() || today });
+            onRefresh();
+        } catch (err) { setError(getErr(err)); }
+    };
+
+    const reactiver = async (c) => {
+        if (!window.confirm(`Réactiver le compte de « ${c.nom} ${c.prenom || ''} » ?`)) return;
+        setError('');
+        try {
+            await api.put(`/admin/consultants/${c.id}/reactiver`);
+            onRefresh();
+        } catch (err) { setError(getErr(err)); }
+    };
+
     return (
         <div className="space-y-6">
             <Card>
@@ -500,7 +523,19 @@ const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
                         ) : consultants.map(c => (
                             <tr key={c.id} className="hover:bg-gray-50">
                                 <td className="p-3 font-bold" style={{ color: COLORS.blue }}>
-                                    {c.nom} {c.prenom}
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className={c.actif === false ? 'opacity-60' : ''}>
+                                            {c.nom} {c.prenom}
+                                        </span>
+                                        {c.actif === false && (
+                                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full whitespace-nowrap"
+                                                  style={{ backgroundColor: '#fee2e2', color: COLORS.red }}>
+                                                Mission terminée{c.dateFinMission
+                                                    ? ` le ${new Date(c.dateFinMission).toLocaleDateString('fr-FR')}`
+                                                    : ''}
+                                            </span>
+                                        )}
+                                    </div>
                                 </td>
                                 <td className="p-3 text-gray-500">
                                     <span className="flex items-center gap-1.5"><Mail size={13} /> {c.email || '—'}</span>
@@ -512,6 +547,15 @@ const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
                                         <Button variant="outline" onClick={() => startEdit(c)}>
                                             <Pencil size={14} /> Modifier
                                         </Button>
+                                        {c.actif === false ? (
+                                            <Button variant="outline" onClick={() => reactiver(c)}>
+                                                <RotateCcw size={14} /> Réactiver
+                                            </Button>
+                                        ) : (
+                                            <Button variant="outline" onClick={() => terminerMission(c)}>
+                                                <UserX size={14} /> Terminer la mission
+                                            </Button>
+                                        )}
                                         <Button variant="danger" onClick={() => remove(c)}>
                                             <Trash2 size={14} /> Supprimer
                                         </Button>
