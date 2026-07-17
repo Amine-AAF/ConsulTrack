@@ -3,7 +3,7 @@ import api from '../api/axiosConfig';
 import * as XLSX from 'xlsx';
 import {
     LayoutDashboard, Users, Building2, Filter, Download,
-    AlertTriangle, RefreshCw, AlertCircle, Search, Wallet,
+    AlertTriangle, RefreshCw, AlertCircle, Search, Wallet, Calendar,
 } from 'lucide-react';
 import {
     PageHeader, StatCard, Card, BudgetGauge, Button, COLORS,
@@ -18,6 +18,12 @@ import {
 const MOIS_COURTS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
 
 const pctBC = (row) => row.totalJoursBC > 0 ? (row.joursConsommesYTD / row.totalJoursBC) * 100 : 0;
+const pctColor = (pct) => pct >= 90 ? COLORS.red : pct >= 80 ? COLORS.amber : COLORS.green;
+
+/** Titre de section discret (majuscules, 11px, gris). */
+const SectionTitle = ({ children }) => (
+    <h2 className="text-[11px] uppercase font-black tracking-wider text-gray-400 mb-3">{children}</h2>
+);
 
 /* --- Export Excel « Fiche de suivi BC » : une feuille par consultant --- */
 const exportFicheSuiviExcel = (rows, annee) => {
@@ -205,25 +211,22 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
         );
     }
 
-    return (
-        <div className="mx-auto max-w-7xl p-4">
-            <PageHeader
-                icon={LayoutDashboard}
-                title={isConsultant ? 'Mon tableau de bord' : 'Pilotage des prestations'}
-                subtitle={isConsultant
-                    ? `Suivi de mes bons de commande — ${year}`
-                    : `Consommation, facturation et alertes budgétaires — ${year}`}
-                actions={
-                    <>
-                        {!isConsultant && (
-                            <Button
-                                variant="secondary"
-                                onClick={() => exportFicheSuiviExcel(scopedRows, year)}
-                                disabled={scopedRows.length === 0}
-                            >
-                                <Download size={16} /> Exporter Fiche de suivi (Excel)
-                            </Button>
-                        )}
+    const emptyState = (
+        <Card className="text-center py-16 text-gray-400">
+            <AlertCircle size={40} className="mx-auto mb-3 opacity-50" />
+            <p className="font-bold">Aucune donnée pour ces critères sur {year}.</p>
+        </Card>
+    );
+
+    /* ================= VUE CONSULTANT (inchangée) ================= */
+    if (isConsultant) {
+        return (
+            <div className="mx-auto max-w-7xl p-4">
+                <PageHeader
+                    icon={LayoutDashboard}
+                    title="Mon tableau de bord"
+                    subtitle={`Suivi de mes bons de commande — ${year}`}
+                    actions={
                         <select
                             className="p-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white outline-none cursor-pointer"
                             style={{ color: COLORS.blue }}
@@ -232,275 +235,316 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                         >
                             {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
                         </select>
-                    </>
-                }
-            />
+                    }
+                />
 
-            {/* KPI */}
-            {isConsultant ? (
+                {/* KPI */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                     <StatCard label="Mes BC actifs" value={scopedRows.length} unit="" />
                     <StatCard label={`Enveloppe ${year}`} value={kpi.totalBudget.toLocaleString('fr-FR')} />
                     <StatCard label="JH consommés" value={kpi.totalJH.toLocaleString('fr-FR')} accent={COLORS.gold} />
                     <StatCard label="BC en alerte (≥80%)" value={kpi.alertes} unit="" alert={kpi.alertes > 0} />
                 </div>
-            ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+
+                {scopedRows.length === 0 ? emptyState : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        {scopedRows.map((bc, idx) => (
+                            <Card key={`${bc.bcId}-${idx}`}>
+                                <div className="flex justify-between items-start mb-1">
+                                    <div>
+                                        <div className="font-black text-lg" style={{ color: COLORS.blue }}>{bc.referenceBC}</div>
+                                        <div className="text-xs text-gray-400 font-bold">{bc.descriptionCodeBudgetaire || '—'}</div>
+                                    </div>
+                                    <span className={`text-xs font-black px-2 py-1 rounded-full ${pctBC(bc) >= 80 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
+                                        {bc.joursRestants?.toFixed(1)} JH restants
+                                    </span>
+                                </div>
+                                <div className="my-4">
+                                    <BudgetGauge label="Consommation" consomme={bc.joursConsommesYTD} max={bc.totalJoursBC} />
+                                </div>
+                                <div className="grid grid-cols-6 gap-1">
+                                    {(bc.mensuel || []).map((v, m) => (
+                                        <div key={m} className="text-center bg-gray-50 rounded-lg py-1.5">
+                                            <div className="text-[9px] font-black text-gray-400 uppercase">{MOIS_COURTS[m]}</div>
+                                            <div className="text-xs font-black" style={{ color: v > 0 ? COLORS.blue : '#d1d5db' }}>
+                                                {v > 0 ? v : '·'}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </Card>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    /* ============ VUE ADMIN / RESPONSABLE : « Pilotage Global » ============ */
+    return (
+        <div className="mx-auto max-w-7xl p-4">
+            <PageHeader
+                icon={LayoutDashboard}
+                title="Pilotage des prestations"
+                subtitle={`Consommation, facturation et alertes budgétaires — ${year}`}
+                actions={
+                    <Button
+                        variant="secondary"
+                        onClick={() => exportFicheSuiviExcel(scopedRows, year)}
+                        disabled={scopedRows.length === 0}
+                    >
+                        <Download size={16} /> Exporter Fiche de suivi (Excel)
+                    </Button>
+                }
+            />
+
+            <div className="space-y-6">
+                {/* ---- Filtres : année, cabinet, consultant, code budgétaire, recherche ---- */}
+                <div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
+                            <Calendar size={16} style={{ color: COLORS.blue }} />
+                            <select
+                                className="bg-transparent outline-none text-sm font-bold cursor-pointer"
+                                style={{ color: COLORS.blue }}
+                                value={year}
+                                onChange={e => setYear(parseInt(e.target.value, 10))}
+                            >
+                                {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                        </div>
+                        <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
+                            <Filter size={16} style={{ color: COLORS.blue }} />
+                            <select
+                                className="bg-transparent outline-none text-sm font-bold cursor-pointer"
+                                style={{ color: COLORS.blue }}
+                                value={filterCabinet}
+                                onChange={e => setFilterCabinet(e.target.value)}
+                            >
+                                <option value="">Tous les cabinets</option>
+                                {cabinets.map(c => <option key={c.id} value={c.nom}>{c.nom}</option>)}
+                            </select>
+                        </div>
+                        <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
+                            <Users size={16} style={{ color: COLORS.blue }} />
+                            <select
+                                className="bg-transparent outline-none text-sm font-bold cursor-pointer"
+                                style={{ color: COLORS.blue }}
+                                value={filterConsultant}
+                                onChange={e => setFilterConsultant(e.target.value)}
+                            >
+                                <option value="">Tous les consultants</option>
+                                {consultantOptions.map(nom => <option key={nom} value={nom}>{nom}</option>)}
+                            </select>
+                        </div>
+                        <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
+                            <Wallet size={16} style={{ color: COLORS.blue }} />
+                            <select
+                                className="bg-transparent outline-none text-sm font-bold cursor-pointer"
+                                style={{ color: COLORS.blue }}
+                                value={filterCode}
+                                onChange={e => setFilterCode(e.target.value)}
+                            >
+                                <option value="">Tous les codes budgétaires</option>
+                                {codeOptions.map(code => <option key={code} value={code}>{code}</option>)}
+                            </select>
+                        </div>
+                        <div className="flex-1 min-w-[220px] flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
+                            <Search size={16} className="text-gray-400" />
+                            <input
+                                className="w-full bg-transparent outline-none text-sm font-bold text-gray-700 placeholder:text-gray-300"
+                                placeholder="Rechercher un consultant ou un BC..."
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Synthèse du budget sélectionné */}
+                    {budgetSummary && (
+                        <div className="flex items-center gap-2 mt-3 text-sm font-bold px-4 py-2.5 rounded-xl border"
+                             style={{ backgroundColor: '#eef4ff', borderColor: '#dbeafe', color: COLORS.blue }}>
+                            <Wallet size={15} />
+                            <span>
+                                Budget {filterCode} : {budgetSummary.jh.toLocaleString('fr-FR')} JH consommés
+                                {' · '}{budgetSummary.montant.toLocaleString('fr-FR')} MAD
+                            </span>
+                        </div>
+                    )}
+                </div>
+
+                {/* ---- KPI ---- */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <StatCard label="Consultants" value={kpi.consultants} unit="" />
                     <StatCard label="JH consommés" value={kpi.totalJH.toLocaleString('fr-FR')} accent={COLORS.gold} />
                     <StatCard label="Montant facturable" value={kpi.montant.toLocaleString('fr-FR')} unit="MAD" accent={COLORS.green} />
                     <StatCard label="BC en alerte (≥80%)" value={kpi.alertes} unit="" alert={kpi.alertes > 0} />
                 </div>
-            )}
 
-            {/* Filtres (ADMIN + RESPONSABLE : cabinet, consultant, code budgétaire, recherche) */}
-            {!isConsultant && (
-                <div className="flex flex-col md:flex-row gap-3 mb-6">
-                    <div className="flex-1 flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
-                        <Search size={16} className="text-gray-400" />
-                        <input
-                            className="w-full bg-transparent outline-none text-sm font-bold text-gray-700 placeholder:text-gray-300"
-                            placeholder="Rechercher un consultant ou un BC..."
-                            value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
-                        />
-                    </div>
-                    {(isAdmin || isResponsable) && (
-                        <>
-                            <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
-                                <Filter size={16} style={{ color: COLORS.blue }} />
-                                <select
-                                    className="bg-transparent outline-none text-sm font-bold cursor-pointer"
-                                    style={{ color: COLORS.blue }}
-                                    value={filterCabinet}
-                                    onChange={e => setFilterCabinet(e.target.value)}
-                                >
-                                    <option value="">Tous les cabinets</option>
-                                    {cabinets.map(c => <option key={c.id} value={c.nom}>{c.nom}</option>)}
-                                </select>
-                            </div>
-                            <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
-                                <Users size={16} style={{ color: COLORS.blue }} />
-                                <select
-                                    className="bg-transparent outline-none text-sm font-bold cursor-pointer"
-                                    style={{ color: COLORS.blue }}
-                                    value={filterConsultant}
-                                    onChange={e => setFilterConsultant(e.target.value)}
-                                >
-                                    <option value="">Tous les consultants</option>
-                                    {consultantOptions.map(nom => <option key={nom} value={nom}>{nom}</option>)}
-                                </select>
-                            </div>
-                            <div className="flex items-center gap-2 bg-white p-2.5 px-4 rounded-xl border border-gray-200">
-                                <Wallet size={16} style={{ color: COLORS.blue }} />
-                                <select
-                                    className="bg-transparent outline-none text-sm font-bold cursor-pointer"
-                                    style={{ color: COLORS.blue }}
-                                    value={filterCode}
-                                    onChange={e => setFilterCode(e.target.value)}
-                                >
-                                    <option value="">Tous les codes budgétaires</option>
-                                    {codeOptions.map(code => <option key={code} value={code}>{code}</option>)}
-                                </select>
-                            </div>
-                        </>
-                    )}
-                </div>
-            )}
-
-            {/* Synthèse du budget sélectionné (ADMIN + RESPONSABLE) */}
-            {!isConsultant && budgetSummary && (
-                <div className="flex items-center gap-2 mb-6 -mt-3 text-sm font-bold px-4 py-2.5 rounded-xl border"
-                     style={{ backgroundColor: '#eef4ff', borderColor: '#dbeafe', color: COLORS.blue }}>
-                    <Wallet size={15} />
-                    <span>
-                        Budget {filterCode} : {budgetSummary.jh.toLocaleString('fr-FR')} JH consommés
-                        {' · '}{budgetSummary.montant.toLocaleString('fr-FR')} MAD
-                    </span>
-                </div>
-            )}
-
-            {/* Alerte : BC proches de l'épuisement */}
-            {alertRows.length > 0 && (
-                <Card className="mb-6 !border-red-200" >
-                    <h3 className="font-black flex items-center gap-2 mb-3" style={{ color: COLORS.red }}>
-                        <AlertTriangle size={18} /> BC proches de l'épuisement (≥ 80 %)
-                    </h3>
-                    <div className="space-y-3">
-                        {alertRows.map((r, i) => (
-                            <div key={`${r.bcId}-${i}`} className="flex flex-col md:flex-row md:items-center gap-2 md:gap-6">
-                                <div className="md:w-64 shrink-0">
-                                    <span className="font-bold text-sm" style={{ color: COLORS.blue }}>{r.nomConsultant}</span>
-                                    <span className="text-xs text-gray-400 font-bold ml-2">{r.nomCabinet}</span>
-                                </div>
-                                <div className="flex-1">
-                                    <BudgetGauge label={r.referenceBC} consomme={r.joursConsommesYTD} max={r.totalJoursBC} />
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </Card>
-            )}
-
-            {scopedRows.length === 0 ? (
-                <Card className="text-center py-16 text-gray-400">
-                    <AlertCircle size={40} className="mx-auto mb-3 opacity-50" />
-                    <p className="font-bold">Aucune donnée pour ces critères sur {year}.</p>
-                </Card>
-            ) : isConsultant ? (
-                /* ================= VUE CONSULTANT ================= */
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {scopedRows.map((bc, idx) => (
-                        <Card key={`${bc.bcId}-${idx}`}>
-                            <div className="flex justify-between items-start mb-1">
-                                <div>
-                                    <div className="font-black text-lg" style={{ color: COLORS.blue }}>{bc.referenceBC}</div>
-                                    <div className="text-xs text-gray-400 font-bold">{bc.descriptionCodeBudgetaire || '—'}</div>
-                                </div>
-                                <span className={`text-xs font-black px-2 py-1 rounded-full ${pctBC(bc) >= 80 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
-                                    {bc.joursRestants?.toFixed(1)} JH restants
-                                </span>
-                            </div>
-                            <div className="my-4">
-                                <BudgetGauge label="Consommation" consomme={bc.joursConsommesYTD} max={bc.totalJoursBC} />
-                            </div>
-                            <div className="grid grid-cols-6 gap-1">
-                                {(bc.mensuel || []).map((v, m) => (
-                                    <div key={m} className="text-center bg-gray-50 rounded-lg py-1.5">
-                                        <div className="text-[9px] font-black text-gray-400 uppercase">{MOIS_COURTS[m]}</div>
-                                        <div className="text-xs font-black" style={{ color: v > 0 ? COLORS.blue : '#d1d5db' }}>
-                                            {v > 0 ? v : '·'}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </Card>
-                    ))}
-                </div>
-            ) : (
-                /* ============ VUE RESPONSABLE / ADMIN : par cabinet ============ */
-                <div className="space-y-6">
-                    {byCabinet.map(([nomCabinet, rows]) => {
-                        const consultantsCab = [...new Set(rows.map(r => r.nomConsultant))];
-                        const jhCab = rows.reduce((s, r) => s + (r.joursConsommesYTD || 0), 0);
-                        const montantCab = rows.reduce((s, r) => s + (r.montantConsommeYTD || 0), 0);
-                        return (
-                            <Card key={nomCabinet}>
-                                <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-4 border-b border-gray-100">
-                                    <h3 className="font-black text-lg flex items-center gap-2" style={{ color: COLORS.blue }}>
-                                        <Building2 size={20} style={{ color: COLORS.green }} /> {nomCabinet}
-                                    </h3>
-                                    <div className="flex items-center gap-5 text-sm">
-                                        <span className="flex items-center gap-1.5 font-bold text-gray-500">
-                                            <Users size={15} /> {consultantsCab.length} consultant{consultantsCab.length > 1 ? 's' : ''}
-                                        </span>
-                                        <span className="font-black" style={{ color: COLORS.gold }}>
-                                            {jhCab.toLocaleString('fr-FR')} JH
-                                        </span>
-                                        <span className="font-black" style={{ color: COLORS.green }}>
-                                            {montantCab.toLocaleString('fr-FR')} MAD
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-5">
-                                    {consultantsCab.map(nomConsultant => {
-                                        const bcRows = rows.filter(r => r.nomConsultant === nomConsultant);
-                                        const montantConsultant = bcRows.reduce((s, r) => s + (r.montantConsommeYTD || 0), 0);
-                                        return (
-                                            <div key={nomConsultant} className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                                                <div className="flex flex-wrap justify-between items-center mb-3">
-                                                    <div className="font-black text-sm uppercase" style={{ color: COLORS.blue }}>
-                                                        {nomConsultant}
-                                                    </div>
-                                                    <div className="text-xs font-bold text-gray-400">
-                                                        Facturable : <span style={{ color: COLORS.green }}>{montantConsultant.toLocaleString('fr-FR')} MAD</span>
-                                                    </div>
-                                                </div>
-                                                <div className="space-y-3">
-                                                    {bcRows.map((r, i) => (
-                                                        <BudgetGauge
-                                                            key={`${r.bcId}-${i}`}
-                                                            label={`${r.referenceBC}${r.descriptionCodeBudgetaire ? ' — ' + r.descriptionCodeBudgetaire : ''}`}
-                                                            consomme={r.joursConsommesYTD}
-                                                            max={r.totalJoursBC}
-                                                        />
-                                                    ))}
+                {scopedRows.length === 0 ? emptyState : (
+                    <>
+                        {/* ---- Suivi par cabinet (compact) ---- */}
+                        <section>
+                            <SectionTitle>Suivi par cabinet</SectionTitle>
+                            <div className="space-y-6">
+                                {byCabinet.map(([nomCabinet, rows]) => {
+                                    const consultantsCab = [...new Set(rows.map(r => r.nomConsultant))];
+                                    const jhCab = rows.reduce((s, r) => s + (r.joursConsommesYTD || 0), 0);
+                                    const montantCab = rows.reduce((s, r) => s + (r.montantConsommeYTD || 0), 0);
+                                    return (
+                                        <Card key={nomCabinet}>
+                                            <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-4 border-b border-gray-100">
+                                                <h3 className="font-black text-lg flex items-center gap-2" style={{ color: COLORS.blue }}>
+                                                    <Building2 size={20} style={{ color: COLORS.green }} /> {nomCabinet}
+                                                </h3>
+                                                <div className="flex items-center gap-5 text-sm">
+                                                    <span className="flex items-center gap-1.5 font-bold text-gray-500">
+                                                        <Users size={15} /> {consultantsCab.length} consultant{consultantsCab.length > 1 ? 's' : ''}
+                                                    </span>
+                                                    <span className="font-black" style={{ color: COLORS.gold }}>
+                                                        {jhCab.toLocaleString('fr-FR')} JH
+                                                    </span>
+                                                    <span className="font-black" style={{ color: COLORS.green }}>
+                                                        {montantCab.toLocaleString('fr-FR')} MAD
+                                                    </span>
                                                 </div>
                                             </div>
-                                        );
-                                    })}
-                                </div>
-                            </Card>
-                        );
-                    })}
-                </div>
-            )}
 
-            {/* ==== ADMIN + RESPONSABLE : Activité réalisée par consultant / année / BC ==== */}
-            {!isConsultant && activiteParConsultant.length > 0 && (
-                <Card className="mt-6">
-                    <h3 className="font-black text-lg flex items-center gap-2 mb-4" style={{ color: COLORS.blue }}>
-                        <LayoutDashboard size={20} style={{ color: COLORS.green }} /> Activité réalisée — {year}
-                    </h3>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-xs border-collapse min-w-[900px]">
-                            <thead>
-                                <tr className="border-b border-gray-200">
-                                    <th className="text-left text-[10px] uppercase font-black text-gray-400 py-2 px-2">Référence BC</th>
-                                    <th className="text-left text-[10px] uppercase font-black text-gray-400 py-2 px-2">Désignation</th>
-                                    {MOIS_COURTS.map((m) => (
-                                        <th key={m} className="text-center text-[10px] font-black text-gray-400 py-2 px-1">{m}</th>
-                                    ))}
-                                    <th className="text-right text-[10px] uppercase font-black text-gray-400 py-2 px-2">Total année</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {activiteParConsultant.map(([nomConsultant, bcRows]) => {
-                                    const totalMensuel = Array.from({ length: 12 }, (_, m) =>
-                                        bcRows.reduce((s, r) => s + (r.mensuel?.[m] || 0), 0));
-                                    const totalAnnee = bcRows.reduce((s, r) => s + (r.joursConsommesYTD || 0), 0);
-                                    return (
-                                        <React.Fragment key={nomConsultant}>
-                                            <tr className="border-t border-gray-100 bg-gray-50">
-                                                <td colSpan={15} className="py-2 px-2 font-black text-sm uppercase" style={{ color: COLORS.blue }}>
-                                                    {nomConsultant}
-                                                </td>
-                                            </tr>
-                                            {bcRows.map((r, i) => (
-                                                <tr key={`${r.bcId}-${i}`} className="border-t border-gray-50">
-                                                    <td className="py-1.5 px-2 font-bold" style={{ color: COLORS.blue }}>{r.referenceBC}</td>
-                                                    <td className="py-1.5 px-2 text-gray-500 font-semibold">{r.descriptionCodeBudgetaire || '—'}</td>
-                                                    {Array.from({ length: 12 }, (_, m) => {
-                                                        const v = r.mensuel?.[m] || 0;
-                                                        return (
-                                                            <td key={m} className="py-1.5 px-1 text-center text-gray-600">
-                                                                {v ? v.toLocaleString('fr-FR') : ''}
-                                                            </td>
-                                                        );
-                                                    })}
-                                                    <td className="py-1.5 px-2 text-right font-black" style={{ color: COLORS.gold }}>
-                                                        {(r.joursConsommesYTD || 0).toLocaleString('fr-FR')}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                            <tr className="border-t border-gray-200 font-black" style={{ color: COLORS.blue }}>
-                                                <td className="py-1.5 px-2" colSpan={2}>Sous-total {nomConsultant}</td>
-                                                {totalMensuel.map((v, m) => (
-                                                    <td key={m} className="py-1.5 px-1 text-center">
-                                                        {v ? v.toLocaleString('fr-FR') : ''}
-                                                    </td>
-                                                ))}
-                                                <td className="py-1.5 px-2 text-right">{totalAnnee.toLocaleString('fr-FR')}</td>
-                                            </tr>
-                                        </React.Fragment>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                                                {consultantsCab.sort((a, b) => a.localeCompare(b)).map(nomConsultant => {
+                                                    const bcRows = rows.filter(r => r.nomConsultant === nomConsultant);
+                                                    const jhConsultant = +bcRows.reduce((s, r) => s + (r.joursConsommesYTD || 0), 0).toFixed(1);
+                                                    const maxConsultant = +bcRows.reduce((s, r) => s + (r.totalJoursBC || 0), 0).toFixed(1);
+                                                    return (
+                                                        <div key={nomConsultant} className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                                                            <div className="flex justify-between items-baseline gap-2 mb-3">
+                                                                <div className="font-black text-sm uppercase truncate" style={{ color: COLORS.blue }}>
+                                                                    {nomConsultant}
+                                                                </div>
+                                                                <div className="text-[11px] font-bold text-gray-400 whitespace-nowrap">
+                                                                    {bcRows.length} BC · <span style={{ color: COLORS.gold }}>{jhConsultant.toLocaleString('fr-FR')} JH</span>
+                                                                </div>
+                                                            </div>
+                                                            <BudgetGauge label="Consommation globale" consomme={jhConsultant} max={maxConsultant} />
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </Card>
                                     );
                                 })}
-                            </tbody>
-                        </table>
-                    </div>
-                </Card>
-            )}
+                            </div>
+                        </section>
+
+                        {/* ---- Activité réalisée (détail BC) ---- */}
+                        {activiteParConsultant.length > 0 && (
+                            <section>
+                                <SectionTitle>Activité réalisée — {year}</SectionTitle>
+                                <Card>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-xs border-collapse min-w-[1000px]">
+                                            <thead>
+                                                <tr className="border-b border-gray-200">
+                                                    <th className="text-left text-[10px] uppercase font-black text-gray-400 py-2 px-2">Référence BC</th>
+                                                    <th className="text-left text-[10px] uppercase font-black text-gray-400 py-2 px-2">Désignation</th>
+                                                    {MOIS_COURTS.map((m) => (
+                                                        <th key={m} className="text-center text-[10px] font-black text-gray-400 py-2 px-1">{m}</th>
+                                                    ))}
+                                                    <th className="text-right text-[10px] uppercase font-black text-gray-400 py-2 px-2">Total année</th>
+                                                    <th className="text-right text-[10px] uppercase font-black text-gray-400 py-2 px-2">Jours max</th>
+                                                    <th className="text-right text-[10px] uppercase font-black text-gray-400 py-2 px-2">% conso</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {activiteParConsultant.map(([nomConsultant, bcRows]) => {
+                                                    const totalMensuel = Array.from({ length: 12 }, (_, m) =>
+                                                        bcRows.reduce((s, r) => s + (r.mensuel?.[m] || 0), 0));
+                                                    const totalAnnee = bcRows.reduce((s, r) => s + (r.joursConsommesYTD || 0), 0);
+                                                    const totalMax = bcRows.reduce((s, r) => s + (r.totalJoursBC || 0), 0);
+                                                    const pctTotal = totalMax > 0 ? (totalAnnee / totalMax) * 100 : 0;
+                                                    return (
+                                                        <React.Fragment key={nomConsultant}>
+                                                            <tr className="border-t border-gray-100 bg-gray-50">
+                                                                <td colSpan={17} className="py-2 px-2 font-black text-sm uppercase" style={{ color: COLORS.blue }}>
+                                                                    {nomConsultant}
+                                                                </td>
+                                                            </tr>
+                                                            {bcRows.map((r, i) => {
+                                                                const pct = pctBC(r);
+                                                                return (
+                                                                    <tr key={`${r.bcId}-${i}`} className="border-t border-gray-50">
+                                                                        <td className="py-1.5 px-2 font-bold" style={{ color: COLORS.blue }}>{r.referenceBC}</td>
+                                                                        <td className="py-1.5 px-2 text-gray-500 font-semibold">{r.descriptionCodeBudgetaire || '—'}</td>
+                                                                        {Array.from({ length: 12 }, (_, m) => {
+                                                                            const v = r.mensuel?.[m] || 0;
+                                                                            return (
+                                                                                <td key={m} className="py-1.5 px-1 text-center text-gray-600">
+                                                                                    {v ? v.toLocaleString('fr-FR') : ''}
+                                                                                </td>
+                                                                            );
+                                                                        })}
+                                                                        <td className="py-1.5 px-2 text-right font-black" style={{ color: COLORS.gold }}>
+                                                                            {(r.joursConsommesYTD || 0).toLocaleString('fr-FR')}
+                                                                        </td>
+                                                                        <td className="py-1.5 px-2 text-right font-bold text-gray-500">
+                                                                            {(r.totalJoursBC || 0).toLocaleString('fr-FR')}
+                                                                        </td>
+                                                                        <td className="py-1.5 px-2 text-right font-black" style={{ color: pctColor(pct) }}>
+                                                                            {Math.round(pct)} %
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                            <tr className="border-t border-gray-200 font-black" style={{ color: COLORS.blue }}>
+                                                                <td className="py-1.5 px-2" colSpan={2}>Sous-total {nomConsultant}</td>
+                                                                {totalMensuel.map((v, m) => (
+                                                                    <td key={m} className="py-1.5 px-1 text-center">
+                                                                        {v ? v.toLocaleString('fr-FR') : ''}
+                                                                    </td>
+                                                                ))}
+                                                                <td className="py-1.5 px-2 text-right">{totalAnnee.toLocaleString('fr-FR')}</td>
+                                                                <td className="py-1.5 px-2 text-right">{totalMax.toLocaleString('fr-FR')}</td>
+                                                                <td className="py-1.5 px-2 text-right" style={{ color: pctColor(pctTotal) }}>
+                                                                    {Math.round(pctTotal)} %
+                                                                </td>
+                                                            </tr>
+                                                        </React.Fragment>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </Card>
+                            </section>
+                        )}
+
+                        {/* ---- Alertes budgétaires (en bas de page) ---- */}
+                        {alertRows.length > 0 && (
+                            <section>
+                                <SectionTitle>Alertes budgétaires</SectionTitle>
+                                <Card className="!border-red-200">
+                                    <h3 className="font-black text-sm flex items-center gap-2 mb-2" style={{ color: COLORS.red }}>
+                                        <AlertTriangle size={16} /> BC proches de l'épuisement (≥ 80 %)
+                                    </h3>
+                                    <div className="divide-y divide-gray-50">
+                                        {alertRows.map((r, i) => (
+                                            <div key={`${r.bcId}-${i}`} className="flex flex-col md:flex-row md:items-center gap-1.5 md:gap-6 py-2.5">
+                                                <div className="md:w-64 shrink-0 truncate">
+                                                    <span className="font-bold text-sm" style={{ color: COLORS.blue }}>{r.nomConsultant}</span>
+                                                    <span className="text-xs text-gray-400 font-bold ml-2">{r.nomCabinet}</span>
+                                                </div>
+                                                <div className="flex-1">
+                                                    <BudgetGauge label={r.referenceBC} consomme={r.joursConsommesYTD} max={r.totalJoursBC} />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </Card>
+                            </section>
+                        )}
+                    </>
+                )}
+            </div>
         </div>
     );
 };
