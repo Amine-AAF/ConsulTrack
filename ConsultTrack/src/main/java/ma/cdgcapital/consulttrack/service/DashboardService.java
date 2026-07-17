@@ -590,6 +590,23 @@ public class DashboardService {
         return bcRepository.save(bc);
     }
 
+    /**
+     * Autorise/révoque la consommation du reliquat de ce BC sur l'année suivante.
+     * RESPONSABLE : uniquement les BC des consultants de ses cabinets gérés.
+     */
+    @Transactional
+    public BonDeCommande setReportReliquat(Long bcId, boolean autorise, Consultant viewer) {
+        BonDeCommande bc = bcRepository.findById(bcId)
+                .orElseThrow(() -> new BusinessException("Bon de commande introuvable: " + bcId));
+        Set<Long> scope = cabinetScope(viewer);
+        if (scope != null && !inScope(bc.getConsultant(), scope)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Accès refusé : BC hors de votre périmètre de cabinets.");
+        }
+        bc.setReportReliquat(autorise);
+        return bcRepository.save(bc);
+    }
+
     // ==========================================
     // 5. VALIDATION / REJET (UNITAIRE)
     // ==========================================

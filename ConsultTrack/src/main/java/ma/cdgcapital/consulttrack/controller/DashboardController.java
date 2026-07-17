@@ -178,6 +178,16 @@ public class DashboardController {
         return ResponseEntity.ok(EntityMapper.toDto(dashboardService.saveBC(bc)));
     }
 
+    /** Report du reliquat sur l'année suivante — décision ADMIN/RESPONSABLE (scopé). */
+    @PutMapping("/admin/bcs/{id}/report-reliquat")
+    public ResponseEntity<BonDeCommandeDTO> setReportReliquat(
+            @PathVariable Long id,
+            @RequestBody ReportReliquatRequest req,
+            Authentication auth) {
+        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.setReportReliquat(
+                id, Boolean.TRUE.equals(req.getAutorise()), accessGuard.currentUser(auth))));
+    }
+
     // --- VALIDATION DES SAISIES (Admin) ---
     @GetMapping("/admin/saisies/en-attente")
     public ResponseEntity<List<TacheRealiseeDTO>> getPendingSaisies() {

@@ -42,7 +42,8 @@ private Boolean reportReliquat = false;
 
 ### Endpoint de décision
 
-`PATCH /api/admin/bcs/{id}/report-reliquat` — body `{ "autorise": true|false }`.
+`PUT /api/admin/bcs/{id}/report-reliquat` — body `{ "autorise": true|false }`
+(PUT et non PATCH : `WebConfig.allowedMethods` n'autorise pas PATCH en CORS).
 
 - Rôles : ADMIN, RESPONSABLE.
 - RESPONSABLE : refus (`AccessDeniedException`) si le consultant du BC n'appartient
