@@ -136,8 +136,14 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                 resFeries.data.forEach((jf) => { feriesMap[normDate(jf.date)] = jf.libelle; });
 
                 const cid = parseInt(consultantId, 10);
+                // BC pointables pour l'année affichée : année courante (ou sans année, compat)
+                // + BC N-1 dont le reliquat est reporté et non épuisé.
                 const mesBcs = resBcs.data.filter(
-                    (bc) => bc.consultantId === cid || bc.consultant?.id === cid,
+                    (bc) => (bc.consultantId === cid || bc.consultant?.id === cid)
+                        && (bc.anneeBudgetaire == null
+                            || bc.anneeBudgetaire === annee
+                            || (bc.anneeBudgetaire === annee - 1 && bc.reportReliquat
+                                && ((bc.joursMax ?? 0) - (bc.joursConsommes ?? 0) - (bc.joursEngages ?? 0)) > 0)),
                 );
 
                 setSaisies(saisiesMap);
