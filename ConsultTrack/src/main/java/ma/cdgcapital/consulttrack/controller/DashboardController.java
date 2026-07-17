@@ -42,7 +42,9 @@ public class DashboardController {
     public ResponseEntity<List<TacheRealiseeDTO>> getTimesheet(
             @PathVariable Long consultantId,
             @RequestParam int annee,
-            @RequestParam int mois) {
+            @RequestParam int mois,
+            Authentication auth) {
+        accessGuard.assertOwnership(auth, consultantId); // anti-IDOR lecture
         return ResponseEntity.ok(dashboardService.getPointagesMensuels(consultantId, annee, mois)
                 .stream().map(EntityMapper::toDto).toList());
     }
@@ -194,7 +196,9 @@ public class DashboardController {
     public ResponseEntity<List<AbsenceDTO>> getAbsences(
             @PathVariable Long consultantId,
             @RequestParam int annee,
-            @RequestParam int mois) {
+            @RequestParam int mois,
+            Authentication auth) {
+        accessGuard.assertOwnership(auth, consultantId); // anti-IDOR lecture
         return ResponseEntity.ok(dashboardService.getAbsencesMensuelles(consultantId, annee, mois)
                 .stream().map(EntityMapper::toDto).toList());
     }

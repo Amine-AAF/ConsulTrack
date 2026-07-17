@@ -73,6 +73,9 @@ public class DashboardService {
             if (bc.getConsultant() == null) continue;
             // RESPONSABLE : uniquement les consultants de ses cabinets gérés
             if (!inScope(bc.getConsultant(), scope)) continue;
+            // CONSULTANT : uniquement ses propres lignes (anti-IDOR serveur)
+            if (viewer != null && viewer.getRole() == Role.CONSULTANT
+                    && !bc.getConsultant().getId().equals(viewer.getId())) continue;
 
             if (cabinetId != null) {
                 if (bc.getConsultant().getCabinet() == null
