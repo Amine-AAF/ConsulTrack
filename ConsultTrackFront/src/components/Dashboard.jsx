@@ -25,6 +25,14 @@ const SectionTitle = ({ children }) => (
     <h2 className="text-[11px] uppercase font-black tracking-wider text-gray-400 mb-3">{children}</h2>
 );
 
+/** Badge « Reliquat 2025 » sur les lignes issues d'un report d'année précédente. */
+const ReliquatBadge = ({ row }) => row.reliquatAnneePrecedente ? (
+    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full whitespace-nowrap"
+          style={{ backgroundColor: '#fdf6e9', color: COLORS.gold }}>
+        Reliquat {row.anneeOrigine}
+    </span>
+) : null;
+
 /* --- Export Excel « Fiche de suivi BC » : une feuille par consultant --- */
 const exportFicheSuiviExcel = (rows, annee) => {
     const byConsultant = rows.reduce((acc, r) => {
@@ -42,7 +50,7 @@ const exportFicheSuiviExcel = (rows, annee) => {
 
         const dataRows = bcRows.map(r => [
             r.referenceBC,
-            r.descriptionCodeBudgetaire || '',
+            (r.descriptionCodeBudgetaire || '') + (r.reliquatAnneePrecedente ? ` (Reliquat ${r.anneeOrigine})` : ''),
             r.totalJoursBC ?? 0,
             r.joursConsommesYTD ?? 0,
             r.joursRestants ?? 0,
@@ -252,7 +260,9 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                             <Card key={`${bc.bcId}-${idx}`}>
                                 <div className="flex justify-between items-start mb-1">
                                     <div>
-                                        <div className="font-black text-lg" style={{ color: COLORS.blue }}>{bc.referenceBC}</div>
+                                        <div className="font-black text-lg flex items-center gap-2" style={{ color: COLORS.blue }}>
+                                            {bc.referenceBC} <ReliquatBadge row={bc} />
+                                        </div>
                                         <div className="text-xs text-gray-400 font-bold">{bc.descriptionCodeBudgetaire || '—'}</div>
                                     </div>
                                     <span className={`text-xs font-black px-2 py-1 rounded-full ${pctBC(bc) >= 80 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
@@ -473,7 +483,9 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                                                                 const pct = pctBC(r);
                                                                 return (
                                                                     <tr key={`${r.bcId}-${i}`} className="border-t border-gray-50">
-                                                                        <td className="py-1.5 px-2 font-bold" style={{ color: COLORS.blue }}>{r.referenceBC}</td>
+                                                                        <td className="py-1.5 px-2 font-bold" style={{ color: COLORS.blue }}>
+                                                                            <span className="flex items-center gap-1.5">{r.referenceBC} <ReliquatBadge row={r} /></span>
+                                                                        </td>
                                                                         <td className="py-1.5 px-2 text-gray-500 font-semibold">{r.descriptionCodeBudgetaire || '—'}</td>
                                                                         {Array.from({ length: 12 }, (_, m) => {
                                                                             const v = r.mensuel?.[m] || 0;
@@ -534,7 +546,9 @@ const Dashboard = ({ userRole = 'CONSULTANT', userId }) => {
                                                     <span className="text-xs text-gray-400 font-bold ml-2">{r.nomCabinet}</span>
                                                 </div>
                                                 <div className="flex-1">
-                                                    <BudgetGauge label={r.referenceBC} consomme={r.joursConsommesYTD} max={r.totalJoursBC} />
+                                                    <BudgetGauge
+                                                        label={r.reliquatAnneePrecedente ? `${r.referenceBC} (Reliquat ${r.anneeOrigine})` : r.referenceBC}
+                                                        consomme={r.joursConsommesYTD} max={r.totalJoursBC} />
                                                 </div>
                                             </div>
                                         ))}
