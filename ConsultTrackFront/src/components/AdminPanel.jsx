@@ -641,6 +641,15 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
         setSaving(false);
     };
 
+    // Report du reliquat sur l'année suivante (BC des années passées uniquement)
+    const toggleReport = async (bc) => {
+        setError('');
+        try {
+            await api.put(`/admin/bcs/${bc.id}/report-reliquat`, { autorise: !bc.reportReliquat });
+            onRefresh();
+        } catch (err) { setError(getErr(err)); }
+    };
+
     const consultantsOnly = consultants.filter(c => !c.role || c.role === 'CONSULTANT');
 
     return (
@@ -712,6 +721,19 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
                             {bc.consultant ? `${bc.consultant.nom} ${bc.consultant.prenom || ''}` : 'Non affecté'}
                         </div>
                         <BudgetGauge label="Consommation" consomme={bc.joursConsommes ?? 0} max={bc.joursMax ?? 0} />
+                        {bc.anneeBudgetaire != null && bc.anneeBudgetaire < currentYear
+                            && ((bc.joursMax ?? 0) - (bc.joursConsommes ?? 0)) > 0 && (
+                            <button
+                                onClick={() => toggleReport(bc)}
+                                className="mt-3 w-full text-xs font-black px-3 py-2 rounded-xl border transition-all"
+                                style={bc.reportReliquat
+                                    ? { backgroundColor: '#f0fdf4', borderColor: COLORS.green, color: COLORS.green }
+                                    : { backgroundColor: '#fff', borderColor: '#e5e7eb', color: '#6b7280' }}>
+                                {bc.reportReliquat
+                                    ? `✓ Reliquat reporté sur ${bc.anneeBudgetaire + 1} — cliquer pour annuler`
+                                    : `Autoriser le report du reliquat sur ${bc.anneeBudgetaire + 1}`}
+                            </button>
+                        )}
                     </Card>
                 ))}
             </div>
