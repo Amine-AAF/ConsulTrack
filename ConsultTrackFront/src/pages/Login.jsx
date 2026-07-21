@@ -1,18 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Lock, User, LogIn } from 'lucide-react';
+import { Lock, User, LogIn, AlertTriangle } from 'lucide-react';
 
 const Login = () => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [sessionExpiree, setSessionExpiree] = useState(false);
     const { login } = useAuth();
     const navigate = useNavigate();
+
+    // Drapeau posé par l'intercepteur axios quand un 401 a purgé la session.
+    // Jamais remis à false ici : StrictMode monte le composant deux fois et le
+    // second passage ne trouverait plus le drapeau.
+    useEffect(() => {
+        if (sessionStorage.getItem('sessionExpiree') === '1') {
+            setSessionExpiree(true);
+            sessionStorage.removeItem('sessionExpiree');
+        }
+    }, []);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+        setSessionExpiree(false);
 
         const result = await login(email, password);
 
@@ -36,6 +48,13 @@ const Login = () => {
                     <h2 className="text-2xl font-black text-[#003366]">Connexion</h2>
                     <p className="text-gray-400 text-sm">ConsultTrack System</p>
                 </div>
+
+                {sessionExpiree && (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-700 p-3 rounded-lg text-sm mb-4 font-bold flex items-start gap-2">
+                        <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                        <span>Votre session a expiré. Merci de vous authentifier à nouveau pour continuer.</span>
+                    </div>
+                )}
 
                 {error && (
                     <div className="bg-red-50 text-red-500 p-3 rounded-lg text-sm mb-4 font-bold text-center">

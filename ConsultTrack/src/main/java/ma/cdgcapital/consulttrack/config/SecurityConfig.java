@@ -11,8 +11,12 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 
 @Configuration
 @EnableWebSecurity
@@ -28,6 +32,37 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * Session absente, token invalide ou expiré → 401 (et non 403).
+     * C'est ce code que l'intercepteur axios attend pour purger la session et
+     * renvoyer l'utilisateur vers la page de connexion. Un utilisateur bien
+     * authentifié mais sans le rôle requis continue de recevoir un 403.
+     */
+    @Bean
+    public AuthenticationEntryPoint unauthorizedEntryPoint() {
+        return (request, response, ex) -> {
+            response.setStatus(401);
+            response.setContentType("application/json");
+            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+            response.getWriter().write(
+                    "{\"timestamp\":\"" + Instant.now() + "\",\"status\":401,"
+                            + "\"message\":\"Session expirée : veuillez vous reconnecter.\"}");
+        };
+    }
+
+    /** Authentifié mais rôle insuffisant → 403 (distinct de l'expiration de session). */
+    @Bean
+    public org.springframework.security.web.access.AccessDeniedHandler forbiddenHandler() {
+        return (request, response, ex) -> {
+            response.setStatus(403);
+            response.setContentType("application/json");
+            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+            response.getWriter().write(
+                    "{\"timestamp\":\"" + Instant.now() + "\",\"status\":403,"
+                            + "\"message\":\"Accès refusé : droits insuffisants.\"}");
+        };
     }
 
     @Bean
@@ -52,6 +87,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "RESPONSABLE")
                         // Le reste authentifié
                         .anyRequest().authenticated())
+                .exceptionHandling(e -> e
+                        .authenticationEntryPoint(unauthorizedEntryPoint())
+                        .accessDeniedHandler(forbiddenHandler()))
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
