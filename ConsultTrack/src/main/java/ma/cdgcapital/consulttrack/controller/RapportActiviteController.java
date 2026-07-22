@@ -40,21 +40,24 @@ public class RapportActiviteController {
 
     @PreAuthorize("hasAnyRole('ADMIN','RESPONSABLE')")
     @GetMapping("/admin/rapports/pending")
-    public List<RapportActiviteDTO> getPending() {
-        return rapportActiviteService.getPending();
+    public List<RapportActiviteDTO> getPending(Authentication auth) {
+        // RESPONSABLE : uniquement les rapports de ses cabinets gérés
+        return rapportActiviteService.getPending(accessGuard.currentUser(auth));
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','RESPONSABLE')")
     @PutMapping("/admin/rapports/{id}/valider")
     public ResponseEntity<Void> valider(@PathVariable Long id, Authentication auth) {
-        rapportActiviteService.valider(id, auth != null ? auth.getName() : null);
+        rapportActiviteService.valider(id, auth != null ? auth.getName() : null,
+                accessGuard.currentUser(auth));
         return ResponseEntity.ok().build();
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','RESPONSABLE')")
     @PutMapping("/admin/rapports/{id}/rejeter")
-    public ResponseEntity<Void> rejeter(@PathVariable Long id, @RequestParam String motif) {
-        rapportActiviteService.rejeter(id, motif);
+    public ResponseEntity<Void> rejeter(@PathVariable Long id, @RequestParam String motif,
+                                        Authentication auth) {
+        rapportActiviteService.rejeter(id, motif, accessGuard.currentUser(auth));
         return ResponseEntity.ok().build();
     }
 }

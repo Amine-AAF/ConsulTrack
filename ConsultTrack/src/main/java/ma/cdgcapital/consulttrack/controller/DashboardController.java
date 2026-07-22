@@ -82,18 +82,23 @@ public class DashboardController {
     }
 
     @PostMapping("/admin/cabinets")
-    public ResponseEntity<CabinetDTO> createCabinet(@RequestBody Cabinet cabinet) {
-        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.saveCabinet(cabinet)));
+    public ResponseEntity<CabinetDTO> createCabinet(@RequestBody Cabinet cabinet, Authentication auth) {
+        // Création réservée à l'ADMIN (contrôle dans le service)
+        return ResponseEntity.ok(EntityMapper.toDto(
+                dashboardService.saveCabinet(cabinet, accessGuard.currentUser(auth))));
     }
 
     @PutMapping("/admin/cabinets/{id}")
-    public ResponseEntity<CabinetDTO> updateCabinet(@PathVariable Long id, @RequestBody Cabinet cabinet) {
-        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.updateCabinet(id, cabinet)));
+    public ResponseEntity<CabinetDTO> updateCabinet(@PathVariable Long id, @RequestBody Cabinet cabinet,
+                                                    Authentication auth) {
+        // RESPONSABLE : uniquement ses cabinets gérés (contrôle dans le service)
+        return ResponseEntity.ok(EntityMapper.toDto(
+                dashboardService.updateCabinet(id, cabinet, accessGuard.currentUser(auth))));
     }
 
     @DeleteMapping("/admin/cabinets/{id}")
-    public ResponseEntity<Void> deleteCabinet(@PathVariable Long id) {
-        dashboardService.deleteCabinet(id);
+    public ResponseEntity<Void> deleteCabinet(@PathVariable Long id, Authentication auth) {
+        dashboardService.deleteCabinet(id, accessGuard.currentUser(auth));
         return ResponseEntity.ok().build();
     }
 
@@ -106,8 +111,9 @@ public class DashboardController {
 
     @PutMapping("/admin/cabinets/{id}/logo")
     public ResponseEntity<Void> updateCabinetLogo(@PathVariable Long id,
-                                                  @RequestBody Map<String, String> body) {
-        dashboardService.updateCabinetLogo(id, body.get("logoImage"));
+                                                  @RequestBody Map<String, String> body,
+                                                  Authentication auth) {
+        dashboardService.updateCabinetLogo(id, body.get("logoImage"), accessGuard.currentUser(auth));
         return ResponseEntity.ok().build();
     }
 
@@ -190,20 +196,22 @@ public class DashboardController {
 
     // --- VALIDATION DES SAISIES (Admin) ---
     @GetMapping("/admin/saisies/en-attente")
-    public ResponseEntity<List<TacheRealiseeDTO>> getPendingSaisies() {
-        return ResponseEntity.ok(dashboardService.getPendingSaisies()
+    public ResponseEntity<List<TacheRealiseeDTO>> getPendingSaisies(Authentication auth) {
+        // RESPONSABLE : uniquement les saisies de ses cabinets gérés
+        return ResponseEntity.ok(dashboardService.getPendingSaisies(accessGuard.currentUser(auth))
                 .stream().map(EntityMapper::toDto).toList());
     }
 
     @PutMapping("/admin/saisies/{id}/valider")
-    public ResponseEntity<Void> validerSaisie(@PathVariable Long id) {
-        dashboardService.validerSaisie(id);
+    public ResponseEntity<Void> validerSaisie(@PathVariable Long id, Authentication auth) {
+        dashboardService.validerSaisie(id, accessGuard.currentUser(auth));
         return ResponseEntity.ok().build();
     }
 
     @PutMapping("/admin/saisies/{id}/rejeter")
-    public ResponseEntity<Void> rejeterSaisie(@PathVariable Long id, @RequestParam String motif) {
-        dashboardService.rejeterSaisie(id, motif);
+    public ResponseEntity<Void> rejeterSaisie(@PathVariable Long id, @RequestParam String motif,
+                                              Authentication auth) {
+        dashboardService.rejeterSaisie(id, motif, accessGuard.currentUser(auth));
         return ResponseEntity.ok().build();
     }
 
@@ -211,8 +219,9 @@ public class DashboardController {
     public ResponseEntity<Map<String, Object>> validerMois(
             @RequestParam Long consultantId,
             @RequestParam int annee,
-            @RequestParam int mois) {
-        int n = dashboardService.validerMois(consultantId, annee, mois);
+            @RequestParam int mois,
+            Authentication auth) {
+        int n = dashboardService.validerMois(consultantId, annee, mois, accessGuard.currentUser(auth));
         return ResponseEntity.ok(Map.of(
                 "validated", n,
                 "consultantId", consultantId,

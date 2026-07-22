@@ -38,6 +38,7 @@ public class RapportActiviteService {
     @Autowired private TacheRealiseeRepository tacheRepository;
     @Autowired private ConsultantRepository consultantRepository;
     @Autowired private AffectationRepository affectationRepository;
+    @Autowired private ma.cdgcapital.consulttrack.security.AccessGuard accessGuard;
 
     // ==========================================================
     // Rapport d'Activité d'un consultant pour un mois donné
@@ -179,9 +180,12 @@ public class RapportActiviteService {
     // ==========================================================
     // Rapports en attente de validation
     // ==========================================================
-    public List<RapportActiviteDTO> getPending() {
+    /** RESPONSABLE : uniquement les rapports des consultants de ses cabinets gérés. */
+    public List<RapportActiviteDTO> getPending(Consultant viewer) {
+        java.util.Set<Long> scope = accessGuard.cabinetScope(viewer);
         return rapportRepository.findByStatut(StatutPointage.EN_ATTENTE).stream()
                 .filter(ra -> ra.getConsultant() != null)
+                .filter(ra -> accessGuard.inScope(ra.getConsultant(), scope))
                 .map(ra -> getRapport(ra.getConsultant().getId(), ra.getAnnee(), ra.getMois()))
                 .toList();
     }
@@ -189,9 +193,10 @@ public class RapportActiviteService {
     // ==========================================================
     // Validation / Rejet
     // ==========================================================
-    public void valider(Long id, String validatorEmail) {
+    public void valider(Long id, String validatorEmail, Consultant viewer) {
         RapportActivite ra = rapportRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Rapport d'activité introuvable : " + id));
+        accessGuard.assertConsultantDansPerimetre(viewer, ra.getConsultant());
         ra.setStatut(StatutPointage.VALIDE);
         ra.setMotifRejet(null);
         ra.setValidePar(validatorEmail != null
@@ -200,9 +205,10 @@ public class RapportActiviteService {
         rapportRepository.save(ra);
     }
 
-    public void rejeter(Long id, String motif) {
+    public void rejeter(Long id, String motif, Consultant viewer) {
         RapportActivite ra = rapportRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Rapport d'activité introuvable : " + id));
+        accessGuard.assertConsultantDansPerimetre(viewer, ra.getConsultant());
         ra.setStatut(StatutPointage.REJETE);
         ra.setMotifRejet(motif);
         rapportRepository.save(ra);

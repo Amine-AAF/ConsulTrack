@@ -372,10 +372,27 @@ public class DashboardService {
                 .collect(Collectors.toList());
     }
 
-    public Cabinet saveCabinet(Cabinet cabinet) { return cabinetRepository.save(cabinet); }
+    /** RESPONSABLE : le cabinet visé doit faire partie de ses cabinets gérés. ADMIN : tout. */
+    private void assertCabinetGerable(Long cabinetId, Set<Long> scope) {
+        if (scope == null) return;
+        if (cabinetId == null || !scope.contains(cabinetId)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Accès refusé : cabinet hors de votre périmètre de cabinets.");
+        }
+    }
+
+    /** Création de cabinet réservée à l'ADMIN (un RESPONSABLE gère des cabinets existants). */
+    public Cabinet saveCabinet(Cabinet cabinet, Consultant viewer) {
+        if (cabinetScope(viewer) != null) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Accès refusé : la création de cabinet est réservée à l'administrateur.");
+        }
+        return cabinetRepository.save(cabinet);
+    }
 
     @Transactional
-    public Cabinet updateCabinet(Long id, Cabinet maj) {
+    public Cabinet updateCabinet(Long id, Cabinet maj, Consultant viewer) {
+        assertCabinetGerable(id, cabinetScope(viewer));
         Cabinet c = cabinetRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Cabinet introuvable: " + id));
         if (maj.getNom() != null) c.setNom(maj.getNom());
@@ -389,7 +406,8 @@ public class DashboardService {
 
     /** Enregistre (ou efface si vide) le logo d'un cabinet — data-URL base64 image. */
     @Transactional
-    public void updateCabinetLogo(Long id, String logoImage) {
+    public void updateCabinetLogo(Long id, String logoImage, Consultant viewer) {
+        assertCabinetGerable(id, cabinetScope(viewer));
         Cabinet c = cabinetRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Cabinet introuvable: " + id));
         if (logoImage == null || logoImage.isBlank()) {
@@ -413,7 +431,8 @@ public class DashboardService {
     }
 
     @Transactional
-    public void deleteCabinet(Long id) {
+    public void deleteCabinet(Long id, Consultant viewer) {
+        assertCabinetGerable(id, cabinetScope(viewer));
         boolean utilise = consultantRepository.findAll().stream()
                 .anyMatch(c -> c.getCabinet() != null && c.getCabinet().getId().equals(id));
         if (utilise) {
@@ -635,14 +654,19 @@ public class DashboardService {
     // 5. VALIDATION / REJET (UNITAIRE)
     // ==========================================
 
-    public List<TacheRealisee> getPendingSaisies() {
-        return tacheRepository.findByStatut(StatutPointage.EN_ATTENTE);
+    /** RESPONSABLE : uniquement les saisies des consultants de ses cabinets gérés. */
+    public List<TacheRealisee> getPendingSaisies(Consultant viewer) {
+        Set<Long> scope = cabinetScope(viewer);
+        return tacheRepository.findByStatut(StatutPointage.EN_ATTENTE).stream()
+                .filter(t -> inScope(t.getConsultant(), scope))
+                .collect(Collectors.toList());
     }
 
     @Transactional
-    public void validerSaisie(Long id) {
+    public void validerSaisie(Long id, Consultant viewer) {
         TacheRealisee t = tacheRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Saisie introuvable: " + id));
+        assertCibleGerable(t.getConsultant(), cabinetScope(viewer));
         t.setStatut(StatutPointage.VALIDE);
         t.setMotifRejet(null);
         tacheRepository.save(t);
@@ -653,9 +677,10 @@ public class DashboardService {
     }
 
     @Transactional
-    public void rejeterSaisie(Long id, String motif) {
+    public void rejeterSaisie(Long id, String motif, Consultant viewer) {
         TacheRealisee t = tacheRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Saisie introuvable: " + id));
+        assertCibleGerable(t.getConsultant(), cabinetScope(viewer));
         t.setStatut(StatutPointage.REJETE);
         t.setMotifRejet(motif);
         tacheRepository.save(t);
@@ -670,7 +695,13 @@ public class DashboardService {
     // ==========================================
 
     @Transactional
-    public int validerMois(Long consultantId, int annee, int mois) {
+    public int validerMois(Long consultantId, int annee, int mois, Consultant viewer) {
+        Set<Long> scope = cabinetScope(viewer);
+        if (scope != null) {
+            Consultant cible = consultantRepository.findById(consultantId)
+                    .orElseThrow(() -> new BusinessException("Consultant introuvable: " + consultantId));
+            assertCibleGerable(cible, scope);
+        }
         List<TacheRealisee> taches = tacheRepository.findByConsultantStatutAndPeriode(
                 consultantId, StatutPointage.EN_ATTENTE, annee, mois);
 

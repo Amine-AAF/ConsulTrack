@@ -70,6 +70,51 @@ public class AccessGuard {
                 .orElseThrow(() -> new AccessDeniedException("Utilisateur courant introuvable"));
     }
 
+    // ==========================================================
+    // Périmètre RESPONSABLE (cabinets gérés)
+    // ==========================================================
+
+    /** null = pas de restriction (ADMIN/CONSULTANT) ; sinon ids des cabinets gérés du RESPONSABLE. */
+    public java.util.Set<Long> cabinetScope(Consultant viewer) {
+        if (viewer == null || viewer.getRole() != ma.cdgcapital.consulttrack.model.Role.RESPONSABLE) {
+            return null;
+        }
+        return viewer.getCabinetsGeres() == null ? java.util.Set.of()
+                : viewer.getCabinetsGeres().stream().map(Cabinet::getId)
+                        .collect(java.util.stream.Collectors.toSet());
+    }
+
+    /** true si le consultant (via son cabinet) est dans le périmètre (scope null = tout permis). */
+    public boolean inScope(Consultant c, java.util.Set<Long> scope) {
+        if (scope == null) return true;
+        return c != null && c.getCabinet() != null && scope.contains(c.getCabinet().getId());
+    }
+
+    /** RESPONSABLE : le consultant cible doit appartenir à un cabinet géré. ADMIN : pas de restriction. */
+    public void assertConsultantDansPerimetre(Consultant viewer, Consultant cible) {
+        if (!inScope(cible, cabinetScope(viewer))) {
+            throw new AccessDeniedException(
+                    "Accès refusé : consultant hors de votre périmètre de cabinets.");
+        }
+    }
+
+    /** RESPONSABLE : le cabinet visé doit être géré. ADMIN : pas de restriction. */
+    public void assertCabinetDansPerimetre(Consultant viewer, Long cabinetId) {
+        java.util.Set<Long> scope = cabinetScope(viewer);
+        if (scope == null) return;
+        if (cabinetId == null || !scope.contains(cabinetId)) {
+            throw new AccessDeniedException(
+                    "Accès refusé : cabinet hors de votre périmètre de cabinets.");
+        }
+    }
+
+    /** Réserve une action à l'ADMIN (RESPONSABLE refusé). */
+    public void assertAdmin(Consultant viewer) {
+        if (cabinetScope(viewer) != null) {
+            throw new AccessDeniedException("Accès refusé : action réservée à l'administrateur.");
+        }
+    }
+
     private static boolean hasRole(Authentication auth, String role) {
         return auth.getAuthorities().stream().anyMatch(a -> role.equals(a.getAuthority()));
     }
