@@ -34,22 +34,22 @@ public class ValidationController {
     @GetMapping("/pending-counts")
     public Map<String, Long> getPendingCounts(Authentication auth) {
         Consultant viewer = accessGuard.currentUser(auth);
-        Set<Long> scope = cabinetScope(viewer); // null = tout voir (ADMIN)
+        Set<Long> scope = accessGuard.cabinetScope(viewer); // ids consultants rattachés au manager
 
         // Pointages : nombre de couples consultant×mois en attente (pas de lignes brutes)
         long pointages = tacheRepository.findByStatut(StatutPointage.EN_ATTENTE).stream()
-                .filter(t -> t.getConsultant() != null && inScope(t.getConsultant(), scope))
+                .filter(t -> t.getConsultant() != null && accessGuard.inScope(t.getConsultant(), scope))
                 .map(t -> t.getConsultant().getId() + "-" + t.getAnnee() + "-" + t.getMois())
                 .distinct().count();
 
         // Absences : nombre de demandes (groupées par demandeId, sinon par ligne)
         long absences = absenceRepository.findByStatut(StatutPointage.EN_ATTENTE).stream()
-                .filter(a -> a.getConsultant() != null && inScope(a.getConsultant(), scope))
+                .filter(a -> a.getConsultant() != null && accessGuard.inScope(a.getConsultant(), scope))
                 .map(a -> a.getDemandeId() != null ? a.getDemandeId() : "abs-" + a.getId())
                 .distinct().count();
 
         long rapports = rapportRepository.findByStatut(StatutPointage.EN_ATTENTE).stream()
-                .filter(r -> r.getConsultant() != null && inScope(r.getConsultant(), scope))
+                .filter(r -> r.getConsultant() != null && accessGuard.inScope(r.getConsultant(), scope))
                 .count();
 
         return Map.of("pointages", pointages, "absences", absences, "rapports", rapports,

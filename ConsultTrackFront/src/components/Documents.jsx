@@ -123,6 +123,7 @@ const Documents = ({ userRole, userId }) => {
                     <div>
                         <div className="text-lg font-black flex items-center gap-3" style={{ color: COLORS.blue }}>
                             {rpi.moisLabel} <StatusBadge statut={rpi.statutMois} />
+                            {rpi.sourceExterne && <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase text-emerald-700">RPI importé</span>}
                         </div>
                         <div className="text-sm text-gray-500 font-semibold mt-1">
                             {rpi.consultantNom} · {rpi.cabinetNom}
@@ -175,7 +176,10 @@ const Documents = ({ userRole, userId }) => {
                 </Card>
 
                 {/* Grilles hebdomadaires */}
-                <Card>
+                {rpi.sourceExterne ? <Card>
+                    <h3 className="text-xs uppercase font-black text-gray-400 tracking-wider mb-2">Relevé externe validé</h3>
+                    <p className="text-sm text-gray-600">La synthèse mensuelle par BC a été reprise du RPI signé. La répartition journalière par BC n’est pas fournie dans le tableau récapitulatif de la source.</p>
+                </Card> : <Card>
                     <h3 className="text-xs uppercase font-black text-gray-400 tracking-wider mb-4">
                         Détail hebdomadaire
                     </h3>
@@ -231,7 +235,7 @@ const Documents = ({ userRole, userId }) => {
                         <span className="flex items-center gap-1.5"><i className="inline-block w-3 h-3 rounded border border-gray-200" style={{ background: '#fff' }} /> Non saisi</span>
                         <span className="flex items-center gap-1.5"><i className="inline-block w-3 h-3 rounded" style={{ background: '#f8fafc' }} /> Hors mois</span>
                     </div>
-                </Card>
+                </Card>}
 
                 {/* Historique annuel */}
                 <Card>

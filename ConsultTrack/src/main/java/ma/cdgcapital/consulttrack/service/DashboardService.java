@@ -14,8 +14,10 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -28,7 +30,10 @@ public class DashboardService {
     @Autowired private BonDeCommandeRepository bcRepository;
     @Autowired private AbsenceRepository absenceRepository;
     @Autowired private CabinetRepository cabinetRepository;
+    @Autowired private DirectionRepository directionRepository;
+    @Autowired private BudgetAnnuelRepository budgetRepository;
     @Autowired private JourFerieRepository jourFerieRepository;
+    @Autowired private RpiRepository rpiRepository;
     @Autowired private PasswordEncoder passwordEncoder;
 
     // ==========================================
@@ -45,6 +50,20 @@ public class DashboardService {
     private static boolean inScope(Consultant c, Set<Long> scope) {
         if (scope == null) return true;
         return c != null && c.getCabinet() != null && scope.contains(c.getCabinet().getId());
+    }
+
+    private static boolean ownsConsultant(Consultant viewer, Consultant target) {
+        return viewer == null || viewer.getRole() == Role.ADMIN
+                || (viewer.getRole() == Role.RESPONSABLE && target != null && target.getManager() != null
+                && viewer.getId().equals(target.getManager().getId()))
+                || (viewer.getRole() == Role.CONSULTANT && target != null && viewer.getId().equals(target.getId()));
+    }
+
+    private void assertOwned(Consultant viewer, Consultant target) {
+        if (!ownsConsultant(viewer, target)) throw new org.springframework.security.access.AccessDeniedException(
+                "Accès refusé : consultant hors de votre périmètre.");
+        if (viewer != null && viewer.getRole() == Role.RESPONSABLE && target.getRole() != Role.CONSULTANT)
+            throw new org.springframework.security.access.AccessDeniedException("Un manager ne gère que des consultants.");
     }
 
     /** RESPONSABLE : la cible doit être un CONSULTANT de ses cabinets gérés. */
@@ -68,11 +87,12 @@ public class DashboardService {
         Set<Long> scope = cabinetScope(viewer);
         List<BonDeCommande> bcs = bcRepository.findAll();
         List<ConsultantDashboardDTO> report = new ArrayList<>();
+        Map<Long, List<RPI>> rpisParConsultant = new HashMap<>();
 
         for (BonDeCommande bc : bcs) {
             if (bc.getConsultant() == null) continue;
             // RESPONSABLE : uniquement les consultants de ses cabinets gérés
-            if (!inScope(bc.getConsultant(), scope)) continue;
+            if (!ownsConsultant(viewer, bc.getConsultant())) continue;
             // CONSULTANT : uniquement ses propres lignes (anti-IDOR serveur)
             if (viewer != null && viewer.getRole() == Role.CONSULTANT
                     && !bc.getConsultant().getId().equals(viewer.getId())) continue;
@@ -96,12 +116,22 @@ public class DashboardService {
             ConsultantDashboardDTO dto = new ConsultantDashboardDTO();
             Consultant cons = bc.getConsultant();
 
+            dto.setConsultantId(cons.getId());
+            dto.setDirectionId(cons.getDirection() != null ? cons.getDirection().getId() : null);
+            dto.setManagerId(cons.getManager() != null ? cons.getManager().getId() : null);
             dto.setNomConsultant(cons.getNom() + " " + cons.getPrenom());
             dto.setNomCabinet(cons.getCabinet() != null ? cons.getCabinet().getNom() : "Sans Cabinet");
             dto.setReferenceBC(bc.getReference());
             dto.setBcId(bc.getId());
             dto.setTjm(bc.getTjm());
             dto.setDescriptionCodeBudgetaire(bc.getCodeBudget());
+
+            List<RPI> rpisAnnee = rpisParConsultant.computeIfAbsent(cons.getId(),
+                    id -> rpiRepository.findByConsultantIdAndAnnee(id, annee));
+            Map<Integer, Double> consommationSourceParMois = rpisAnnee.stream()
+                    .filter(r -> r.getBc() != null && r.getBc().getId().equals(bc.getId()) && r.getMois() != null)
+                    .collect(Collectors.groupingBy(RPI::getMois,
+                            Collectors.summingDouble(r -> r.getTotalJH() == null ? 0.0 : r.getTotalJH())));
 
             // Toutes les tâches VALIDE du BC : conso de l'année demandée (mensuel)
             // + conso des années antérieures (pour le calcul du reliquat).
@@ -121,12 +151,16 @@ public class DashboardService {
                 if (t.getDuree() == null) continue;
                 int y = t.getDate().getYear();
                 if (y == annee) {
-                    mensuel[t.getDate().getMonthValue() - 1] += t.getDuree();
-                    consoAnnee += t.getDuree();
+                    int month = t.getDate().getMonthValue();
+                    if (!consommationSourceParMois.containsKey(month)) mensuel[month - 1] += t.getDuree();
                 } else if (y < annee) {
                     consoAnterieure += t.getDuree();
                 }
             }
+            consommationSourceParMois.forEach((month, value) -> {
+                if (month >= 1 && month <= 12) mensuel[month - 1] = value;
+            });
+            consoAnnee = Arrays.stream(mensuel).mapToDouble(Double::doubleValue).sum();
 
             double max = bc.getJoursMax() != null ? bc.getJoursMax() : 0.0;
             double enveloppe;
@@ -288,7 +322,7 @@ public class DashboardService {
     /**
      * Vérifie que tous les jours ouvrés (hors week-ends) du mois sont couverts par une saisie
      * (présence, absence ou férié) au statut EN_ATTENTE ou VALIDE — via {@link TacheRealisee}
-     * ou via une demande d'{@link Absence}. Lève une exception listant les jours manquants.
+     * ou via une ancienne demande d'{@link Absence}. Lève une exception listant les jours manquants.
      */
     private void verifierCouvertureJoursOuvres(Long consultantId, int annee, int mois) {
         YearMonth ym = YearMonth.of(annee, mois);
@@ -344,12 +378,25 @@ public class DashboardService {
         BonDeCommande bc = bcRepository.findById(bcId)
                 .orElseThrow(() -> new BusinessException("BC introuvable: " + bcId));
 
-        Double consommes = tacheRepository.sumDureeByBcAndStatut(bcId, StatutPointage.VALIDE);
-        Double engages = tacheRepository.sumDureeByBcAndStatutIn(
-                bcId, Arrays.asList(StatutPointage.EN_ATTENTE, StatutPointage.VALIDE));
+        List<RPI> rpisImportes = rpiRepository.findByBc_Id(bcId);
+        Set<String> moisImportes = rpisImportes.stream()
+                .filter(r -> r.getAnnee() != null && r.getMois() != null)
+                .map(r -> r.getAnnee() + "-" + r.getMois()).collect(Collectors.toSet());
+        double consommeImporte = rpisImportes.stream().mapToDouble(r -> r.getTotalJH() == null ? 0.0 : r.getTotalJH()).sum();
+        List<TacheRealisee> tachesBc = bc.getConsultant() == null ? List.of()
+                : tacheRepository.findByConsultantId(bc.getConsultant().getId()).stream()
+                .filter(t -> t.getBonDeCommande() != null && t.getBonDeCommande().getId().equals(bcId))
+                .filter(t -> t.getDate() == null || !moisImportes.contains(t.getDate().getYear() + "-" + t.getDate().getMonthValue()))
+                .toList();
+        double consommes = consommeImporte + tachesBc.stream()
+                .filter(t -> t.getStatut() == StatutPointage.VALIDE)
+                .mapToDouble(t -> t.getDuree() == null ? 0.0 : t.getDuree()).sum();
+        double engages = consommeImporte + tachesBc.stream()
+                .filter(t -> t.getStatut() == StatutPointage.EN_ATTENTE || t.getStatut() == StatutPointage.VALIDE)
+                .mapToDouble(t -> t.getDuree() == null ? 0.0 : t.getDuree()).sum();
 
-        bc.setJoursConsommes(consommes != null ? consommes : 0.0);
-        bc.setJoursEngages(engages != null ? engages : 0.0);
+        bc.setJoursConsommes(consommes);
+        bc.setJoursEngages(engages);
 
         if (bc.getTjm() != null) {
             bc.setMontantConsomme(bc.getJoursConsommes() * bc.getTjm());
@@ -383,9 +430,13 @@ public class DashboardService {
 
     /** Création de cabinet réservée à l'ADMIN (un RESPONSABLE gère des cabinets existants). */
     public Cabinet saveCabinet(Cabinet cabinet, Consultant viewer) {
-        if (cabinetScope(viewer) != null) {
-            throw new org.springframework.security.access.AccessDeniedException(
-                    "Accès refusé : la création de cabinet est réservée à l'administrateur.");
+        if (viewer != null && viewer.getRole() == Role.RESPONSABLE) {
+            Cabinet saved = cabinetRepository.save(cabinet);
+            Set<Cabinet> assigned = viewer.getCabinetsGeres() == null ? new HashSet<>() : new HashSet<>(viewer.getCabinetsGeres());
+            assigned.add(saved);
+            viewer.setCabinetsGeres(assigned);
+            consultantRepository.save(viewer);
+            return saved;
         }
         return cabinetRepository.save(cabinet);
     }
@@ -448,13 +499,13 @@ public class DashboardService {
         if (scope != null) {
             Consultant cible = consultantRepository.findById(id)
                     .orElseThrow(() -> new BusinessException("Consultant introuvable: " + id));
-            assertCibleGerable(cible, scope);
+            assertOwned(viewer, cible);
             // Anti-escalade : impossible d'attribuer un autre rôle que CONSULTANT
             if (maj.getRole() != null && maj.getRole() != Role.CONSULTANT) {
                 throw new BusinessException(
                         "Un responsable ne peut pas attribuer le rôle " + maj.getRole() + ".");
             }
-            // Le cabinet cible doit rester dans son périmètre
+            // Le cabinet fournisseur cible doit rester dans son périmètre
             if (maj.getCabinet() != null && maj.getCabinet().getId() != null
                     && !scope.contains(maj.getCabinet().getId())) {
                 throw new BusinessException(
@@ -478,6 +529,14 @@ public class DashboardService {
             c.setCabinet(cabinetRepository.findById(maj.getCabinet().getId())
                     .orElseThrow(() -> new BusinessException("Cabinet introuvable")));
         }
+        if (maj.getDirection() != null && maj.getDirection().getId() != null) {
+            c.setDirection(directionRepository.findById(maj.getDirection().getId())
+                    .orElseThrow(() -> new BusinessException("Direction introuvable")));
+        }
+        if (maj.getManager() != null && maj.getManager().getId() != null) {
+            c.setManager(consultantRepository.findById(maj.getManager().getId())
+                    .orElseThrow(() -> new BusinessException("Manager introuvable")));
+        }
         if (maj.getPassword() != null && !maj.getPassword().isBlank()) {
             c.setPassword(passwordEncoder.encode(maj.getPassword()));
         }
@@ -498,7 +557,7 @@ public class DashboardService {
         Consultant cible = consultantRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Consultant introuvable: " + id));
         Set<Long> scope = cabinetScope(viewer);
-        if (scope != null) assertCibleGerable(cible, scope);
+        if (scope != null) assertOwned(viewer, cible);
         cible.setActif(false);
         cible.setDateFinMission(dateFin != null ? dateFin : LocalDate.now());
         return consultantRepository.save(cible);
@@ -510,7 +569,7 @@ public class DashboardService {
         Consultant cible = consultantRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Consultant introuvable: " + id));
         Set<Long> scope = cabinetScope(viewer);
-        if (scope != null) assertCibleGerable(cible, scope);
+        if (scope != null) assertOwned(viewer, cible);
         cible.setActif(true);
         cible.setDateFinMission(null);
         return consultantRepository.save(cible);
@@ -523,7 +582,7 @@ public class DashboardService {
         if (scope != null) {
             Consultant cible = consultantRepository.findById(id)
                     .orElseThrow(() -> new BusinessException("Consultant introuvable: " + id));
-            assertCibleGerable(cible, scope);
+            assertOwned(viewer, cible);
         }
         deleteConsultant(id);
     }
@@ -545,10 +604,10 @@ public class DashboardService {
 
     /** RESPONSABLE : consultants de ses cabinets gérés (+ lui-même). ADMIN : tous. */
     public List<Consultant> getAllConsultants(Consultant viewer) {
-        Set<Long> scope = cabinetScope(viewer);
-        if (scope == null) return getAllConsultants();
+        if (viewer == null || viewer.getRole() == Role.ADMIN) return getAllConsultants();
+        if (viewer.getRole() == Role.CONSULTANT) return List.of(viewer);
         return consultantRepository.findAll().stream()
-                .filter(c -> c.getId().equals(viewer.getId()) || inScope(c, scope))
+                .filter(c -> c.getManager() != null && viewer.getId().equals(c.getManager().getId()))
                 .collect(Collectors.toList());
     }
 
@@ -562,6 +621,8 @@ public class DashboardService {
                         "Un responsable ne peut créer que des comptes CONSULTANT.");
             }
             consultant.setRole(Role.CONSULTANT);
+            consultant.setManager(viewer);
+            consultant.setDirection(viewer.getDirection());
             // Cabinet obligatoire et dans son périmètre
             Long cabinetId = consultant.getCabinet() != null ? consultant.getCabinet().getId() : null;
             if (cabinetId == null || !scope.contains(cabinetId)) {
@@ -600,17 +661,27 @@ public class DashboardService {
             }
             consultant.setCabinetsGeres(cabinets);
         }
+        if (consultant.getDirection() != null && consultant.getDirection().getId() != null)
+            consultant.setDirection(directionRepository.findById(consultant.getDirection().getId())
+                    .orElseThrow(() -> new BusinessException("Direction introuvable")));
+        if (consultant.getManager() != null && consultant.getManager().getId() != null)
+            consultant.setManager(consultantRepository.findById(consultant.getManager().getId())
+                    .orElseThrow(() -> new BusinessException("Manager introuvable")));
         return consultantRepository.save(consultant);
     }
 
     public List<BonDeCommande> getAllBCs() { return bcRepository.findAll(); }
 
+    /** BC du consultant courant, sans exposer le référentiel complet aux comptes CONSULTANT. */
+    public List<BonDeCommande> getBCsForConsultant(Long consultantId) {
+        return bcRepository.findByConsultant_Id(consultantId);
+    }
+
     /** RESPONSABLE : uniquement les BC des consultants de ses cabinets gérés. ADMIN : tous. */
     public List<BonDeCommande> getAllBCs(Consultant viewer) {
-        Set<Long> scope = cabinetScope(viewer);
-        if (scope == null) return getAllBCs();
+        if (viewer == null || viewer.getRole() == Role.ADMIN) return getAllBCs();
         return bcRepository.findAll().stream()
-                .filter(bc -> inScope(bc.getConsultant(), scope))
+                .filter(bc -> ownsConsultant(viewer, bc.getConsultant()))
                 .collect(Collectors.toList());
     }
 
@@ -621,16 +692,30 @@ public class DashboardService {
                             "Consultant introuvable: " + bc.getConsultantId()));
             bc.setConsultant(c);
         }
-        // Nature déduite du code budgétaire : R… = RUN, P… = PROJET
+        // La nature RA est dérivée du type budgétaire, jamais du préfixe du code.
         if (bc.getCodeBudget() != null && !bc.getCodeBudget().isBlank()) {
-            char c = Character.toUpperCase(bc.getCodeBudget().trim().charAt(0));
-            if (c == 'R') bc.setNature(NatureActivite.RUN);
-            else if (c == 'P') bc.setNature(NatureActivite.PROJET);
+            BudgetAnnuel budget = bc.getAnneeBudgetaire() == null ? null
+                    : budgetRepository.findByAnneeAndCodeBudget(bc.getAnneeBudgetaire(), bc.getCodeBudget()).orElse(null);
+            String type = budget == null ? null : budget.getTypeBudget();
+            if ("OPEX".equalsIgnoreCase(type)) bc.setNature(NatureActivite.RUN);
+            else if ("CAPEX".equalsIgnoreCase(type)) bc.setNature(NatureActivite.PROJET);
         }
         if (bc.getJoursConsommes() == null) bc.setJoursConsommes(0.0);
         if (bc.getJoursEngages() == null) bc.setJoursEngages(0.0);
         if (bc.getMontantConsomme() == null) bc.setMontantConsomme(0.0);
         return bcRepository.save(bc);
+    }
+
+    public BonDeCommande saveBC(BonDeCommande bc, Consultant viewer) {
+        if (viewer != null && viewer.getRole() != Role.ADMIN) {
+            Long targetId = bc.getConsultantId() != null ? bc.getConsultantId()
+                    : bc.getConsultant() == null ? null : bc.getConsultant().getId();
+            Consultant target = targetId == null ? null : consultantRepository.findById(targetId).orElse(null);
+            assertOwned(viewer, target);
+            if (viewer.getRole() == Role.CONSULTANT)
+                throw new org.springframework.security.access.AccessDeniedException("Action réservée aux managers.");
+        }
+        return saveBC(bc);
     }
 
     /**
@@ -642,7 +727,7 @@ public class DashboardService {
         BonDeCommande bc = bcRepository.findById(bcId)
                 .orElseThrow(() -> new BusinessException("Bon de commande introuvable: " + bcId));
         Set<Long> scope = cabinetScope(viewer);
-        if (scope != null && !inScope(bc.getConsultant(), scope)) {
+        if (scope != null && !ownsConsultant(viewer, bc.getConsultant())) {
             throw new org.springframework.security.access.AccessDeniedException(
                     "Accès refusé : BC hors de votre périmètre de cabinets.");
         }
@@ -658,7 +743,7 @@ public class DashboardService {
     public List<TacheRealisee> getPendingSaisies(Consultant viewer) {
         Set<Long> scope = cabinetScope(viewer);
         return tacheRepository.findByStatut(StatutPointage.EN_ATTENTE).stream()
-                .filter(t -> inScope(t.getConsultant(), scope))
+                .filter(t -> ownsConsultant(viewer, t.getConsultant()))
                 .collect(Collectors.toList());
     }
 
@@ -666,7 +751,7 @@ public class DashboardService {
     public void validerSaisie(Long id, Consultant viewer) {
         TacheRealisee t = tacheRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Saisie introuvable: " + id));
-        assertCibleGerable(t.getConsultant(), cabinetScope(viewer));
+        assertOwned(viewer, t.getConsultant());
         t.setStatut(StatutPointage.VALIDE);
         t.setMotifRejet(null);
         tacheRepository.save(t);
@@ -680,7 +765,7 @@ public class DashboardService {
     public void rejeterSaisie(Long id, String motif, Consultant viewer) {
         TacheRealisee t = tacheRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Saisie introuvable: " + id));
-        assertCibleGerable(t.getConsultant(), cabinetScope(viewer));
+        assertOwned(viewer, t.getConsultant());
         t.setStatut(StatutPointage.REJETE);
         t.setMotifRejet(motif);
         tacheRepository.save(t);
@@ -700,7 +785,7 @@ public class DashboardService {
         if (scope != null) {
             Consultant cible = consultantRepository.findById(consultantId)
                     .orElseThrow(() -> new BusinessException("Consultant introuvable: " + consultantId));
-            assertCibleGerable(cible, scope);
+            assertOwned(viewer, cible);
         }
         List<TacheRealisee> taches = tacheRepository.findByConsultantStatutAndPeriode(
                 consultantId, StatutPointage.EN_ATTENTE, annee, mois);

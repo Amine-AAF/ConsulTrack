@@ -1,0 +1,13 @@
+@Library('jenkins-commons-library-local') _
+
+javaProjectCI(
+    'consultrack-backend',
+    'ma.cdgcapital.consulttrack.ConsulttrackApplication',
+    'consultrack-backend',
+    '',
+    'container_image',
+    'eventrepo',
+    'harbor.devops.cdgcapital.ma/eventrepo',
+    true,
+    'main'
+)

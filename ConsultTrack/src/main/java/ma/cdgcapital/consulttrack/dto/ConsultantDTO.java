@@ -24,4 +24,7 @@ public class ConsultantDTO {
     private Boolean actif;
     /** Date de fin de mission (ISO yyyy-MM-dd), null si actif. */
     private java.time.LocalDate dateFinMission;
+    private Long directionId;
+    private String directionNom;
+    private Long managerId;
 }

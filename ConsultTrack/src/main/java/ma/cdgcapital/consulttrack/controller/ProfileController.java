@@ -36,6 +36,8 @@ public class ProfileController {
         out.put("email", me.getEmail());
         out.put("role", me.getRole() != null ? me.getRole().name() : null);
         out.put("cabinet", me.getCabinet() != null ? me.getCabinet().getNom() : null);
+        out.put("directionId", me.getDirection() == null ? null : me.getDirection().getId());
+        out.put("directionNom", me.getDirection() == null ? null : me.getDirection().getNom());
         out.put("hasSignature", me.getSignatureImage() != null && !me.getSignatureImage().isBlank());
         out.put("signatureImage", me.getSignatureImage());
         // Périmètre d'un RESPONSABLE : ids + noms des cabinets gérés

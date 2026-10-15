@@ -12,8 +12,7 @@ import org.springframework.stereotype.Component;
  *
  * Le principal JWT ne porte que l'email + le rôle :
  * - ADMIN : accès à tout.
- * - RESPONSABLE : accès aux consultants dont le cabinet fait partie de ses
- *   {@code cabinetsGeres} (périmètre assigné par l'Admin).
+ * - RESPONSABLE : accès aux consultants explicitement rattachés à son compte.
  * - CONSULTANT : uniquement ses propres ressources.
  */
 @Component
@@ -45,11 +44,8 @@ public class AccessGuard {
             }
             Consultant cible = consultantRepository.findById(consultantId)
                     .orElseThrow(() -> new AccessDeniedException("Consultant cible introuvable"));
-            Cabinet cabinetCible = cible.getCabinet();
-            boolean dansPerimetre = cabinetCible != null
-                    && me.getCabinetsGeres() != null
-                    && me.getCabinetsGeres().stream()
-                        .anyMatch(c -> c.getId().equals(cabinetCible.getId()));
+            boolean dansPerimetre = cible.getManager() != null
+                    && me.getId().equals(cible.getManager().getId());
             if (!dansPerimetre) {
                 throw new AccessDeniedException(
                         "Accès refusé : consultant hors de votre périmètre de cabinets.");
@@ -71,23 +67,22 @@ public class AccessGuard {
     }
 
     // ==========================================================
-    // Périmètre RESPONSABLE (cabinets gérés)
+    // Périmètre RESPONSABLE (consultants rattachés)
     // ==========================================================
 
-    /** null = pas de restriction (ADMIN/CONSULTANT) ; sinon ids des cabinets gérés du RESPONSABLE. */
+    /** null = accès global ; pour un manager, les ids des consultants rattachés. */
     public java.util.Set<Long> cabinetScope(Consultant viewer) {
         if (viewer == null || viewer.getRole() != ma.cdgcapital.consulttrack.model.Role.RESPONSABLE) {
             return null;
         }
-        return viewer.getCabinetsGeres() == null ? java.util.Set.of()
-                : viewer.getCabinetsGeres().stream().map(Cabinet::getId)
-                        .collect(java.util.stream.Collectors.toSet());
+        return consultantRepository.findByManager_Id(viewer.getId()).stream()
+                .map(Consultant::getId).collect(java.util.stream.Collectors.toSet());
     }
 
-    /** true si le consultant (via son cabinet) est dans le périmètre (scope null = tout permis). */
+    /** true si le consultant est dans le périmètre (scope null = tout permis). */
     public boolean inScope(Consultant c, java.util.Set<Long> scope) {
         if (scope == null) return true;
-        return c != null && c.getCabinet() != null && scope.contains(c.getCabinet().getId());
+        return c != null && scope.contains(c.getId());
     }
 
     /** RESPONSABLE : le consultant cible doit appartenir à un cabinet géré. ADMIN : pas de restriction. */

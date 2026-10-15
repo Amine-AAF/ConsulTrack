@@ -25,8 +25,8 @@ public class BonDeCommandeDTO {
     private Double joursRestants;
     private Double montantConsomme;
     private String statut;
-    private String nature; // RUN | PROJET (déduite du code budgétaire R…/P…)
-    private Integer anneeBudgetaire;
+    private String nature; // RUN | PROJET, dérivée du type de budget OPEX | CAPEX
+    private Integer anneeBudgetaire; // exercice de suivi, distinct de l'année dans la référence du BC
     /** Reliquat consommable l'année suivante (null traité comme false). */
     private Boolean reportReliquat;
     private Long consultantId;

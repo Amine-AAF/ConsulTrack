@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import api from '../api/axiosConfig';
 import { generateRaPDF } from '../utils/raPdfGenerator';
 import {
@@ -24,12 +24,13 @@ const fmt = (n) => (n == null ? '0' : (Number.isInteger(n) ? String(n) : Number(
    ligne commençant par '- ' = tâche du thème.
    ================================================================ */
 const GENERAL_KEY = '__GENERAL__';
-const BC_MARKER_RE = /@@BC:(.+?)@@/;
+const BC_MARKER_RE = /@@BC(?::|ID:)(.+?)@@/;
+const bcSectionKey = (b) => b?.bcId != null ? `BCID:${b.bcId}` : (b?.reference || GENERAL_KEY);
 
 /** Découpe le texte stocké en { reference → texte de section }. */
 const parseSectionsRa = (texte, bdcs) => {
     const map = {};
-    (bdcs || []).forEach((b) => { map[b.reference] = ''; });
+    (bdcs || []).forEach((b) => { map[bcSectionKey(b)] = ''; });
     const txt = texte || '';
     if (!txt.trim()) {
         if (!bdcs || bdcs.length === 0) map[GENERAL_KEY] = '';
@@ -37,27 +38,36 @@ const parseSectionsRa = (texte, bdcs) => {
     }
     if (!BC_MARKER_RE.test(txt)) {
         // Texte legacy sans marqueurs : 1er BC (ou section « Général »)
-        if (bdcs && bdcs.length > 0) map[bdcs[0].reference] = txt.trim();
+        if (bdcs && bdcs.length > 0) map[bcSectionKey(bdcs[0])] = txt.trim();
         else map[GENERAL_KEY] = txt.trim();
         return map;
     }
-    const parts = txt.split(/@@BC:(.+?)@@/); // [avant, ref1, txt1, ref2, txt2, ...]
+    const parts = txt.split(/@@BC(?::|ID:)(.+?)@@/);
     for (let i = 1; i < parts.length; i += 2) {
-        const ref = parts[i];
+        const marker = parts[i];
+        // Les nouveaux marqueurs identifient la ligne Oracle. Les anciens, par référence,
+        // sont rattachés au premier BC correspondant pour rester compatibles.
+        const idMarker = marker.match(/^ID:(\d+)\|(.*)$/);
+        const ref = idMarker ? `BCID:${idMarker[1]}` : marker;
+        const matchingBc = idMarker
+            ? (bdcs || []).find((b) => String(b.bcId ?? '') === idMarker[1])
+            : (bdcs || []).find((b) => String(b.reference) === ref);
         const body = (parts[i + 1] || '').replace(/^\n/, '').replace(/\s+$/, '');
-        map[ref] = body;
+        map[matchingBc ? bcSectionKey(matchingBc) : ref] = body;
     }
     if ((!bdcs || bdcs.length === 0) && Object.keys(map).length === 0) map[GENERAL_KEY] = '';
     return map;
 };
 
 /** Reconstruit le champ TEXT à partir des sections non vides. */
-const serializeSectionsRa = (sections) =>
+const serializeSectionsRa = (sections, bdcs = []) =>
     Object.entries(sections || {})
         .filter(([, txt]) => txt && txt.trim())
         .map(([ref, txt]) => (ref === GENERAL_KEY
             ? txt.trim() // pas de BC : texte brut (compatible legacy)
-            : `@@BC:${ref}@@\n${txt.trim()}`))
+            : ref.startsWith('BCID:')
+                ? `@@BCID:${ref.slice(5)}|${bdcs.find((b) => String(b.bcId) === ref.slice(5))?.reference || `BC #${ref.slice(5)}`}@@\n${txt.trim()}`
+                : `@@BC:${ref}@@\n${txt.trim()}`))
         .join('\n');
 
 /* ================================================================
@@ -66,13 +76,15 @@ const serializeSectionsRa = (sections) =>
    changent. `onSaved` (optionnel) est appelé après un enregistrement
    réussi. `compact` resserre l'espacement pour un usage encart.
    ================================================================ */
-const RaSaisieSection = ({ consultantId, annee, mois, compact = false, onSaved }) => {
+const RaSaisieSection = ({ consultantId, annee, mois, compact = false, onSaved, pointagesCourants = [], refreshKey }) => {
     const [ra, setRa] = useState(null);
     const [raSections, setRaSections] = useState({}); // { reference BC → texte de section }
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+    const pointagesRef = useRef(pointagesCourants);
+    pointagesRef.current = pointagesCourants;
 
     const raReadOnly = ra?.statut === 'VALIDE';
 
@@ -83,7 +95,8 @@ const RaSaisieSection = ({ consultantId, annee, mois, compact = false, onSaved }
         api.get('/rapports/activite', { params: { consultantId, annee, mois } })
             .then((res) => {
                 setRa(res.data);
-                setRaSections(parseSectionsRa(res.data?.tachesRealisees, res.data?.bdcUtilises));
+                const available = [...(res.data?.bdcUtilises || []), ...pointagesRef.current];
+                setRaSections(parseSectionsRa(res.data?.tachesRealisees, available));
             })
             .catch(() => setError("Erreur lors du chargement du rapport d'activité."))
             .finally(() => setLoading(false));
@@ -92,16 +105,67 @@ const RaSaisieSection = ({ consultantId, annee, mois, compact = false, onSaved }
     useEffect(() => {
         setSuccess('');
         loadRa();
-    }, [loadRa]);
+    }, [loadRa, refreshKey]);
 
-    // Suggestion des tâches depuis les saisies (ajoutées à la 1re section)
-    const suggererTaches = () => {
-        const suggestions = (ra?.tachesSuggerees || []).map((t) => `- ${t}`);
-        if (suggestions.length === 0) return;
+    const bdcs = useMemo(() => {
+        const merged = new Map();
+        (ra?.bdcUtilises || []).forEach((b) => merged.set(bcSectionKey(b), { ...b, statutPointage: 'VALIDE' }));
+        pointagesCourants.forEach((p) => {
+            const key = bcSectionKey(p);
+            const existing = merged.get(key) || {};
+            merged.set(key, {
+                ...existing,
+                ...p,
+                designation: p.designation || existing.designation,
+                nature: p.nature || existing.nature,
+                tachesSuggerees: [...new Set([...(existing.tachesSuggerees || []), ...(p.tachesSuggerees || [])])],
+            });
+        });
+        return [...merged.values()];
+    }, [ra?.bdcUtilises, pointagesCourants]);
+    const totalJHCourant = pointagesCourants.length
+        ? pointagesCourants.reduce((sum, p) => sum + Number(p.jours || 0), 0)
+        : Number(ra?.totalJH || 0);
+    const pointagesProvisoires = pointagesCourants.some((p) => p.statutPointage !== 'VALIDE');
+
+    // Le RPI et le RA se chargent en parallèle. Si les pointages arrivent après le RA,
+    // rattache les sections legacy (par référence) aux nouvelles clés stables des BC.
+    useEffect(() => {
+        if (!bdcs.length) return;
         setRaSections((prev) => {
-            const firstKey = (ra?.bdcUtilises?.[0]?.reference) || Object.keys(prev)[0] || GENERAL_KEY;
-            const cur = prev[firstKey] || '';
-            return { ...prev, [firstKey]: (cur ? cur.trimEnd() + '\n' : '') + suggestions.join('\n') };
+            let changed = false;
+            const next = { ...prev };
+            const firstKey = bcSectionKey(bdcs[0]);
+            if (next[GENERAL_KEY]?.trim() && !next[firstKey]?.trim()) {
+                next[firstKey] = next[GENERAL_KEY];
+                delete next[GENERAL_KEY];
+                changed = true;
+            }
+            bdcs.forEach((b) => {
+                const key = bcSectionKey(b);
+                if (b.reference && Object.prototype.hasOwnProperty.call(next, b.reference)
+                    && !Object.prototype.hasOwnProperty.call(next, key)) {
+                    next[key] = next[b.reference];
+                    delete next[b.reference];
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
+    }, [bdcs]);
+
+    // Suggère les tâches sous le BC réellement pointé.
+    const suggererTaches = () => {
+        setRaSections((prev) => {
+            const next = { ...prev };
+            bdcs.forEach((b) => {
+                const key = bcSectionKey(b);
+                const suggestions = b.tachesSuggerees || (bdcs[0] === b ? ra?.tachesSuggerees : []) || [];
+                const existing = new Set((next[key] || '').split('\n').map((line) => line.replace(/^-\s*/, '').trim()));
+                const additions = suggestions.map((t) => `- ${t}`).filter((line) => !existing.has(line.replace(/^-\s*/, '').trim()));
+                if (additions.length) next[key] = `${next[key] ? `${next[key].trimEnd()}\n` : ''}${additions.join('\n')}`;
+            });
+            return next;
         });
     };
 
@@ -119,7 +183,7 @@ const RaSaisieSection = ({ consultantId, annee, mois, compact = false, onSaved }
             consultantId,
             annee,
             mois,
-            tachesRealisees: serializeSectionsRa(raSections),
+            tachesRealisees: serializeSectionsRa(raSections, bdcs),
             statut,
         })
             .then(() => {
@@ -163,7 +227,6 @@ const RaSaisieSection = ({ consultantId, annee, mois, compact = false, onSaved }
     }
 
     // Groupes RUN / PROJET (par nature du BC ; nature inconnue → PROJET)
-    const bdcs = ra.bdcUtilises || [];
     const groupesBdc = [
         { titre: 'RUN', items: bdcs.filter((b) => b.nature === 'RUN') },
         { titre: 'PROJET', items: bdcs.filter((b) => b.nature !== 'RUN') },
@@ -205,11 +268,7 @@ const RaSaisieSection = ({ consultantId, annee, mois, compact = false, onSaved }
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
-                    <span className="text-xs font-black px-3 py-1.5 rounded-lg"
-                          style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>
-                        Total JH : {fmt(ra.totalJH)} — cohérent RPI ✓
-                    </span>
-                    <Button onClick={() => generateRaPDF({ ...ra, tachesRealisees: serializeSectionsRa(raSections) })}>
+                    <Button onClick={() => generateRaPDF({ ...ra, tachesRealisees: serializeSectionsRa(raSections, bdcs) })}>
                         <Download size={16} /> Exporter PDF
                     </Button>
                 </div>
@@ -238,17 +297,18 @@ const RaSaisieSection = ({ consultantId, annee, mois, compact = false, onSaved }
                         </span>
                     ) : (
                         <Button variant="outline" onClick={suggererTaches}
-                                disabled={!ra.tachesSuggerees || ra.tachesSuggerees.length === 0}>
+                                disabled={!bdcs.some((b) => (b.tachesSuggerees || []).length) && !(ra.tachesSuggerees || []).length}>
                             <Sparkles size={14} /> Suggérer depuis les saisies
                         </Button>
                     )}
                 </div>
 
-                {/* Bandeau total JH (issu du pointage validé) */}
+                {/* Rapprochement du mois : validé officiel, brouillon/en attente provisoire */}
                 <div className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-black"
-                     style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>
-                    <CheckCircle2 size={15} /> Total JH : {fmt(ra.totalJH)} — cohérent RPI ✓
+                     style={{ backgroundColor: pointagesProvisoires ? '#fef3c7' : '#dcfce7', color: pointagesProvisoires ? '#a16207' : '#15803d' }}>
+                    <CheckCircle2 size={15} /> Total JH pointés : {fmt(totalJHCourant)}
                 </div>
+                {pointagesProvisoires && <p className="text-xs text-amber-700">Les JH en brouillon ou en attente sont provisoires ; la consommation officielle dépend de la validation du pointage.</p>}
 
                 {groupesBdc.length === 0 ? (
                     <div className="space-y-2">
@@ -262,18 +322,19 @@ const RaSaisieSection = ({ consultantId, annee, mois, compact = false, onSaved }
                             {g.titre}
                         </h4>
                         {g.items.map((b) => (
-                            <div key={b.reference} className="border border-gray-100 rounded-xl p-4 space-y-2 bg-gray-50/50">
+                            <div key={bcSectionKey(b)} className="border border-gray-100 rounded-xl p-4 space-y-2 bg-gray-50/50">
                                 <div className="font-black text-sm" style={{ color: COLORS.blue }}>
                                     BC {b.reference} : {b.designation || '—'}{' '}
                                     <span className="text-[11px] font-black px-2 py-0.5 rounded-full align-middle"
                                           style={{ backgroundColor: '#fef9c3', color: '#a16207' }}>
                                         {fmt(b.jours)} JH
                                     </span>
+                                    {b.statutPointage && b.statutPointage !== 'VALIDE' && <span className="ml-2 text-[10px] font-bold text-amber-700">{b.statutPointage === 'EN_ATTENTE' ? 'En attente' : 'Brouillon'}</span>}
                                 </div>
                                 <p className="text-[11px] text-gray-400 font-semibold">
-                                    JH issus du pointage validé (cohérent RPI)
+                                    {b.statutPointage === 'VALIDE' ? 'JH issus du pointage validé' : 'JH pointés — provisoires'}
                                 </p>
-                                {renderSectionTextarea(b.reference)}
+                                {renderSectionTextarea(bcSectionKey(b))}
                             </div>
                         ))}
                     </div>

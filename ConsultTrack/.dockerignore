@@ -1,0 +1,10 @@
+.git
+.devops
+.env
+.env.*
+!.env.example
+.idea
+.vscode
+target
+*.iml
+README.md

@@ -12,8 +12,8 @@ import RaSaisieSection from './RaSaisieSection.jsx';
 
 /* ============================================================
    Ma Présence (RPI) — saisie mensuelle de présence par BC.
-   Un jour ouvré = présence (peinte sur un BC), absence (via
-   demande), ou férié (géré par l'admin). Soumission mensuelle.
+   Un jour ouvré = présence sur un BC, absence dans le RPI ou férié.
+   Présences et absences suivent le même statut mensuel.
    ============================================================ */
 
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -33,22 +33,6 @@ const weekdaysOfMonth = (annee, mois) => {
         if (dow !== 0 && dow !== 6) res.push({ day: d, dateStr: iso(annee, mois, d), dow });
     }
     return res;
-};
-
-/** Regroupe des dates ISO triées en plages contiguës (les week-ends ne coupent pas). */
-const contiguousRuns = (dateStrs) => {
-    const sorted = [...dateStrs].sort();
-    const runs = [];
-    sorted.forEach((ds) => {
-        const last = runs[runs.length - 1];
-        if (last) {
-            const next = new Date(`${last.fin}T00:00:00`);
-            do { next.setDate(next.getDate() + 1); } while ([0, 6].includes(next.getDay()));
-            if (iso(next.getFullYear(), next.getMonth() + 1, next.getDate()) === ds) { last.fin = ds; return; }
-        }
-        runs.push({ debut: ds, fin: ds });
-    });
-    return runs;
 };
 
 const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
@@ -73,7 +57,6 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
     const [painted, setPainted] = useState({});     // { dateStr: {bcId, duree, desc, type, jira, isNew} }
     const [selectedBcId, setSelectedBcId] = useState('');
     const [uiMode, setUiMode] = useState('PRESENCE'); // 'PRESENCE' | 'ABSENCE'
-    const [absSelection, setAbsSelection] = useState([]); // dates ISO sélectionnées pour demande
     const [absMotif, setAbsMotif] = useState(MOTIFS_ABSENCE[0]);
 
     // --- UI ---
@@ -101,7 +84,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
 
     useEffect(() => {
         setSaisies({}); setAbsences({}); setFeries({}); setBcs([]);
-        setPainted({}); setAbsSelection([]); setMissingDays([]);
+        setPainted({}); setMissingDays([]);
         setPrevMonthOk(true);
         if (!consultantId) return;
 
@@ -110,7 +93,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
             try {
                 const [resTaches, resBcs, resAbs, resFeries, resStatus] = await Promise.all([
                     api.get(`/dashboard/timesheet/${consultantId}?annee=${annee}&mois=${mois}`),
-                    api.get('/admin/bcs'),
+                    api.get(`/dashboard/consultants/${consultantId}/bcs`),
                     api.get(`/dashboard/absences/${consultantId}?annee=${annee}&mois=${mois}`),
                     api.get(`/jours-feries?annee=${annee}`),
                     api.get(`/timesheet/status?consultantId=${consultantId}&annee=${annee}&mois=${mois}`),
@@ -125,6 +108,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                     if (t.statut === 'BROUILLON') {
                         paintedMap[ds] = {
                             bcId: t.bonDeCommande?.id ?? t.bcId, duree: t.duree,
+                            mode: t.modeSaisie || 'BC', motif: t.modeSaisie === 'ABSENCE' ? t.descriptionTache : null,
                             desc: t.descriptionTache, type: t.typePrestation, jira: t.ticketJira,
                             isNew: false,
                         };
@@ -143,7 +127,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                         && (bc.anneeBudgetaire == null
                             || bc.anneeBudgetaire === annee
                             || (bc.anneeBudgetaire === annee - 1 && bc.reportReliquat
-                                && ((bc.joursMax ?? 0) - (bc.joursConsommes ?? 0) - (bc.joursEngages ?? 0)) > 0)),
+                                && ((bc.joursMax ?? 0) - Math.max(bc.joursConsommes ?? 0, bc.joursEngages ?? 0)) > 0)),
                 );
 
                 setSaisies(saisiesMap);
@@ -153,7 +137,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                 setBcs(mesBcs);
                 setSelectedBcId((prev) => {
                     if (mesBcs.some((b) => String(b.id) === String(prev))) return prev;
-                    const dispo = mesBcs.find((b) => (b.joursMax || 0) - (b.joursConsommes || 0) - (b.joursEngages || 0) > 0);
+                    const dispo = mesBcs.find((b) => (b.joursMax || 0) - Math.max(b.joursConsommes || 0, b.joursEngages || 0) > 0);
                     return String((dispo || mesBcs[0])?.id ?? '');
                 });
                 setPrevMonthOk(resStatus.data === true);
@@ -185,7 +169,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
 
     /** État d'un jour ouvré pour la grille et les règles de clic. */
     const getDayState = useCallback((dateStr) => {
-        if (painted[dateStr]) return { kind: 'PAINTED', locked: false };
+        if (painted[dateStr]) return { kind: painted[dateStr].mode === 'ABSENCE' ? 'ABS_PAINTED' : 'PAINTED', locked: false };
         if (feries[dateStr]) return { kind: 'FERIE', locked: true };
         const abs = absences[dateStr];
         if (abs) {
@@ -195,6 +179,10 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         }
         const s = saisies[dateStr];
         if (s) {
+            if (s.modeSaisie === 'ABSENCE') {
+                if (s.statut === 'VALIDE') return { kind: 'ABS_VALIDE', locked: true };
+                if (s.statut === 'EN_ATTENTE') return { kind: 'ABS_ATTENTE', locked: true };
+            }
             if (s.statut === 'VALIDE') return { kind: 'SAISIE_VALIDE', locked: true };
             if (s.statut === 'EN_ATTENTE') return { kind: 'SAISIE_ATTENTE', locked: true };
             if (s.statut === 'REJETE') return { kind: 'REJETE', locked: true }; // débloqué via « Corriger »
@@ -213,10 +201,18 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
     const monthStep = useMemo(() => {
         const entries = Object.values(saisies);
         if (entries.some((t) => t.statut === 'REJETE')) return 'REJETE';
-        if (entries.length && entries.every((t) => t.statut === 'VALIDE')) return 'VALIDE';
         if (entries.some((t) => t.statut === 'EN_ATTENTE')) return 'SOUMIS';
+        const covered = weekdays.every(({ dateStr }) => feries[dateStr]
+            || (absences[dateStr] && absences[dateStr].statut !== 'REJETE')
+            || (saisies[dateStr] && saisies[dateStr].statut !== 'REJETE'));
+        const validations = weekdays
+            .filter(({ dateStr }) => !feries[dateStr])
+            .map(({ dateStr }) => saisies[dateStr] || absences[dateStr])
+            .filter(Boolean);
+        if (covered && validations.length > 0
+            && validations.every((entry) => entry.statut === 'VALIDE')) return 'VALIDE';
         return 'BROUILLON';
-    }, [saisies]);
+    }, [saisies, absences, feries, weekdays]);
 
     /** Consommation à l'écran d'un BC (brouillons peints, non comptés côté serveur). */
     const paintedByBc = useMemo(() => {
@@ -227,7 +223,9 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         return map;
     }, [painted]);
 
-    const bcConso = (bc) => (bc.joursConsommes || 0) + (bc.joursEngages || 0) + (paintedByBc[bc.id] || 0);
+    // joursEngages inclut déjà les jours consommés (validés) ; Math.max garde
+    // aussi les anciennes lignes où l'un des deux compteurs n'a pas été recalculé.
+    const bcConso = (bc) => Math.max(bc.joursConsommes || 0, bc.joursEngages || 0) + (paintedByBc[bc.id] || 0);
     const bcRestant = (bc) => (bc.joursMax || 0) - bcConso(bc);
     const bcRef = (bcId) => bcs.find((b) => String(b.id) === String(bcId))?.reference || 'BC ?';
 
@@ -238,13 +236,61 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         let nbFeries = 0;
         weekdays.forEach(({ dateStr }) => {
             if (feries[dateStr]) { nbFeries += 1; return; }
-            if (absences[dateStr]) { nbAbsences += 1; return; }
+            if (absences[dateStr] || saisies[dateStr]?.modeSaisie === 'ABSENCE'
+                || painted[dateStr]?.mode === 'ABSENCE') { nbAbsences += 1; return; }
             const duree = painted[dateStr]?.duree
                 ?? (['EN_ATTENTE', 'VALIDE'].includes(saisies[dateStr]?.statut) ? saisies[dateStr].duree : 0);
             if (duree > 0) { joursTravailles += 1; totalJH += duree; }
         });
         return { joursTravailles, totalJH, nbAbsences, nbFeries };
     }, [weekdays, feries, absences, painted, saisies]);
+
+    // Vue mensuelle en direct pour le RA : pointages déjà soumis/validés,
+    // brouillons persistés et saisies encore peintes dans le calendrier.
+    const pointagesCourants = useMemo(() => {
+        const byBc = new Map();
+        const add = (bcId, duree, statut, description) => {
+            if (bcId == null || !(Number(duree) > 0)) return;
+            const bc = bcs.find((candidate) => String(candidate.id) === String(bcId));
+            if (!bc) return;
+            const key = String(bc.id);
+            const row = byBc.get(key) || {
+                bcId: bc.id,
+                reference: bc.reference || `BC #${bc.id}`,
+                designation: bc.designation || '',
+                nature: bc.nature || null,
+                jours: 0,
+                statuts: new Set(),
+                taches: new Set(),
+            };
+            row.jours += Number(duree);
+            row.statuts.add(statut);
+            const task = String(description || '').trim();
+            if (task && task.toLocaleLowerCase('fr') !== 'prestation') row.taches.add(task);
+            byBc.set(key, row);
+        };
+
+        const monthPrefix = `${annee}-${String(mois).padStart(2, '0')}-`;
+        Object.entries(saisies).forEach(([date, tache]) => {
+            if (!date.startsWith(monthPrefix) || !['EN_ATTENTE', 'VALIDE'].includes(tache.statut)) return;
+            add(tache.bonDeCommande?.id ?? tache.bcId, tache.duree, tache.statut, tache.descriptionTache);
+        });
+        Object.entries(painted).forEach(([date, pointage]) => {
+            if (!date.startsWith(monthPrefix)) return;
+            add(pointage.bcId, pointage.duree, 'BROUILLON', pointage.desc);
+        });
+
+        return [...byBc.values()].map((row) => ({
+            bcId: row.bcId,
+            reference: row.reference,
+            designation: row.designation,
+            nature: row.nature,
+            jours: row.jours,
+            statutPointage: row.statuts.has('EN_ATTENTE') ? 'EN_ATTENTE'
+                : row.statuts.has('BROUILLON') ? 'BROUILLON' : 'VALIDE',
+            tachesSuggerees: [...row.taches],
+        }));
+    }, [annee, mois, bcs, saisies, painted]);
 
     // ============================== ACTIONS ==============================
 
@@ -255,7 +301,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         if (restant < 0.5) { notify('error', `Budget épuisé pour le BC ${bc?.reference || ''}.`); return prev; }
         return {
             ...prev,
-            [dateStr]: { bcId: parseInt(selectedBcId, 10), duree: Math.min(1.0, restant), isNew: true },
+            [dateStr]: { bcId: parseInt(selectedBcId, 10), duree: Math.min(1.0, restant), mode: 'BC', isNew: true },
         };
     };
 
@@ -263,10 +309,15 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         const state = getDayState(dateStr);
 
         if (uiMode === 'ABSENCE') {
-            if (state.kind !== 'LIBRE') return;
-            setAbsSelection((prev) => (prev.includes(dateStr)
-                ? prev.filter((d) => d !== dateStr)
-                : [...prev, dateStr]));
+            if (!['LIBRE', 'PAINTED', 'ABS_PAINTED'].includes(state.kind)) return;
+            setPainted((prev) => {
+                if (prev[dateStr]?.mode === 'ABSENCE') {
+                    const next = { ...prev };
+                    delete next[dateStr];
+                    return next;
+                }
+                return { ...prev, [dateStr]: { mode: 'ABSENCE', duree: 0, motif: absMotif, isNew: true } };
+            });
             return;
         }
 
@@ -274,6 +325,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         setPainted((prev) => {
             const current = prev[dateStr];
             if (!current) return paintDay(dateStr, prev);
+            if (current.mode === 'ABSENCE') return paintDay(dateStr, prev);
             // Cycle : 1.0 → 0.5 → retrait
             if (current.duree > 0.5) return { ...prev, [dateStr]: { ...current, duree: 0.5 } };
             const next = { ...prev };
@@ -293,7 +345,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
             if (getDayState(ds).kind !== 'LIBRE') return;
             if (restant < 0.5) { manqueBudget = true; return; }
             const duree = Math.min(1.0, restant);
-            additions[ds] = { bcId: parseInt(selectedBcId, 10), duree, isNew: true };
+            additions[ds] = { bcId: parseInt(selectedBcId, 10), duree, mode: 'BC', isNew: true };
             restant -= duree;
         });
         if (!Object.keys(additions).length) {
@@ -319,6 +371,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
             rejectedDays.forEach(({ dateStr, saisie }) => {
                 next[dateStr] = {
                     bcId: saisie.bonDeCommande?.id ?? saisie.bcId, duree: saisie.duree,
+                    mode: saisie.modeSaisie || 'BC', motif: saisie.modeSaisie === 'ABSENCE' ? saisie.descriptionTache : null,
                     desc: saisie.descriptionTache, type: saisie.typePrestation, jira: saisie.ticketJira,
                     isNew: false,
                 };
@@ -334,11 +387,12 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         consultantId: parseInt(consultantId, 10),
         bcId: p.bcId,
         date: dateStr,
-        duree: p.duree,
-        mode: 'BC',
+        duree: p.mode === 'ABSENCE' ? 1 : p.duree,
+        mode: p.mode || 'BC',
         statut,
-        // Défauts fixes : la nature de la prestation est portée par le BC (backend/RA)
-        descriptionTache: (p.isNew ? 'Prestation' : p.desc) || 'Prestation',
+        descriptionTache: p.mode === 'ABSENCE'
+            ? (p.motif || absMotif)
+            : ((p.isNew ? 'Prestation' : p.desc) || 'Prestation'),
         typePrestation: p.isNew ? null : p.type ?? null,
         ticketJira: (p.isNew ? '' : p.jira) || '',
     }));
@@ -365,7 +419,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         }
         const payload = buildPayload(submit ? 'EN_ATTENTE' : 'BROUILLON');
         if (!payload.length) {
-            notify('info', 'Aucun jour de présence à enregistrer.');
+            notify('info', 'Aucune saisie RPI à enregistrer.');
             return;
         }
         setSaving(true);
@@ -378,32 +432,6 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         } catch (err) {
             const data = err.response?.data;
             notify('error', (typeof data === 'string' ? data : data?.message) || 'Erreur technique lors de l\'enregistrement.');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const sendAbsenceRequest = async () => {
-        if (!absSelection.length) return;
-        setSaving(true);
-        try {
-            const runs = contiguousRuns(absSelection);
-            for (const run of runs) {
-                // eslint-disable-next-line no-await-in-loop
-                await api.post('/dashboard/absences/demande', {
-                    consultantId: parseInt(consultantId, 10),
-                    dateDebut: run.debut,
-                    dateFin: run.fin,
-                    motif: absMotif,
-                });
-            }
-            notify('success', `Demande d'absence envoyée (${runs.length} période${runs.length > 1 ? 's' : ''}).`);
-            setAbsSelection([]);
-            setUiMode('PRESENCE');
-            setRefreshKey((k) => k + 1);
-        } catch (err) {
-            const data = err.response?.data;
-            notify('error', (typeof data === 'string' ? data : data?.message) || 'Erreur lors de l\'envoi de la demande.');
         } finally {
             setSaving(false);
         }
@@ -485,7 +513,6 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
         const p = painted[dateStr];
         const s = saisies[dateStr];
         const abs = absences[dateStr];
-        const selectedForAbs = absSelection.includes(dateStr);
 
         let cls = 'bg-white hover:border-gray-400 cursor-pointer';
         let style = {};
@@ -502,7 +529,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
             case 'ABS_VALIDE':
                 cls = 'cursor-not-allowed text-white';
                 style = { backgroundColor: COLORS.red };
-                title = `Absence validée : ${abs.motif || ''}`;
+                title = `Absence validée : ${abs?.motif || s?.descriptionTache || ''}`;
                 content = <span className="text-[10px] font-black flex items-center gap-0.5"><Lock size={9} /> ABS</span>;
                 break;
             case 'ABS_ATTENTE':
@@ -511,8 +538,14 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                     color: '#92400e',
                     background: 'repeating-linear-gradient(45deg, #fef3c7, #fef3c7 5px, #fde68a 5px, #fde68a 10px)',
                 };
-                title = `Demande d'absence en cours (${abs.motif || ''})`;
-                content = <span className="text-[10px] font-black">ABS ?</span>;
+                title = `Absence soumise (${abs?.motif || s?.descriptionTache || ''})`;
+                content = <span className="text-[10px] font-black">ABS ·</span>;
+                break;
+            case 'ABS_PAINTED':
+                cls = 'cursor-pointer text-white';
+                style = { backgroundColor: COLORS.red };
+                title = `Absence à enregistrer : ${p.motif || absMotif}`;
+                content = <span className="text-[10px] font-black">ABS</span>;
                 break;
             case 'SAISIE_VALIDE':
                 cls = 'cursor-not-allowed';
@@ -551,10 +584,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                 break;
             default: // LIBRE
                 if (uiMode === 'ABSENCE') {
-                    cls = selectedForAbs
-                        ? 'cursor-pointer border-2 border-dashed border-red-400 bg-red-100 text-red-700'
-                        : 'bg-white hover:border-red-300 cursor-pointer';
-                    if (selectedForAbs) content = <span className="text-[9px] font-black">ABS</span>;
+                    cls = 'bg-white hover:border-red-300 cursor-pointer';
                 }
                 break;
         }
@@ -606,7 +636,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
             <PageHeader
                 icon={CalendarCheck}
                 title="Ma Présence (RPI)"
-                subtitle="Relevé de présence individuel : peignez vos jours sur un bon de commande, puis soumettez le mois."
+                subtitle="Saisissez vos présences par BC et vos absences dans le même relevé, puis soumettez le mois."
                 actions={(
                     <>
                         <Button variant="outline" disabled={!canSaveDraft} onClick={() => save(false)}>
@@ -731,8 +761,7 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                             <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4 text-[10px] font-bold text-gray-500">
                                 <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.blue }} /> Présence</span>
                                 <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ backgroundColor: '#dbeafe' }} /> Férié / Soumis</span>
-                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.red }} /> Absence validée</span>
-                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ background: 'repeating-linear-gradient(45deg,#fef3c7,#fef3c7 3px,#fde68a 3px,#fde68a 6px)' }} /> Absence en attente</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.red }} /> Absence</span>
                                 <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ backgroundColor: '#e2e8f0' }} /> Validé</span>
                             </div>
                         </Card>
@@ -740,30 +769,16 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                         {/* ===== Colonne latérale ===== */}
                         <div className="space-y-5">
                             {uiMode === 'ABSENCE' ? (
-                                /* --- Panneau demande d'absence --- */
+                                /* --- Saisie d'absence dans le RPI --- */
                                 <Card>
                                     <h3 className="text-sm font-black uppercase mb-3 flex items-center gap-2" style={{ color: COLORS.red }}>
-                                        <Palmtree size={16} /> Demande d'absence
+                                        <Palmtree size={16} /> Saisie d'absence
                                     </h3>
                                     <p className="text-xs text-gray-500 mb-3">
-                                        Cliquez sur les jours libres du calendrier pour les sélectionner,
-                                        puis envoyez votre demande. Elle sera soumise à validation.
+                                        Cliquez sur les jours concernés dans le calendrier, puis enregistrez le RPI.
+                                        L'absence suit le même statut que le reste du mois, sans demande séparée.
                                     </p>
-                                    <div className="mb-3">
-                                        <label className="text-[10px] uppercase font-bold text-gray-400">Jours sélectionnés</label>
-                                        {absSelection.length === 0 ? (
-                                            <p className="text-xs text-gray-400 mt-1 italic">Aucun jour sélectionné.</p>
-                                        ) : (
-                                            <div className="flex flex-wrap gap-1.5 mt-1.5">
-                                                {[...absSelection].sort().map((ds) => (
-                                                    <span key={ds} className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
-                                                        {new Date(`${ds}T00:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="mb-4">
+                                    <div>
                                         <label className="text-[10px] uppercase font-bold text-gray-400">Motif</label>
                                         <select
                                             className="w-full mt-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none"
@@ -772,11 +787,6 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                                             {MOTIFS_ABSENCE.map((m) => <option key={m} value={m}>{m}</option>)}
                                         </select>
                                     </div>
-                                    <Button variant="danger" className="w-full justify-center"
-                                            disabled={!absSelection.length || saving}
-                                            onClick={sendAbsenceRequest}>
-                                        <Send size={14} /> Envoyer la demande
-                                    </Button>
                                 </Card>
                             ) : (
                                 /* --- Sélecteur de BC --- */
@@ -831,7 +841,8 @@ const TimesheetForm = ({ userRole = 'ADMIN', userId = null }) => {
                         </button>
                         {showRa && (
                             <div className="mt-4">
-                                <RaSaisieSection consultantId={consultantId} annee={annee} mois={mois} compact />
+                                <RaSaisieSection consultantId={consultantId} annee={annee} mois={mois}
+                                    pointagesCourants={pointagesCourants} refreshKey={refreshKey} compact />
                             </div>
                         )}
                     </Card>

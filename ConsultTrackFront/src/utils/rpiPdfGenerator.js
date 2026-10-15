@@ -101,6 +101,12 @@ export const generateRpiPDF = (rpi) => {
     y += 6;
     doc.text(`Total JH (mtd) : ${fmt(rpi.totalMtd)}   /   Total JH (std) : ${fmt(rpi.totalStd)}`, 14, y);
     y += 6;
+    if (rpi.sourceExterne) {
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text('Synthèse reprise du RPI externe validé ; détail journalier par BC non fourni dans la source.', 14, y);
+        y += 5;
+    }
 
     // ---------- UN TABLEAU PAR SEMAINE ----------
     (rpi.semaines || []).forEach((s) => {

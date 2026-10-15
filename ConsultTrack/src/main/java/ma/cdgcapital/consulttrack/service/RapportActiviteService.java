@@ -10,6 +10,7 @@ import ma.cdgcapital.consulttrack.model.RapportActivite;
 import ma.cdgcapital.consulttrack.model.StatutPointage;
 import ma.cdgcapital.consulttrack.model.TacheRealisee;
 import ma.cdgcapital.consulttrack.repository.AffectationRepository;
+import ma.cdgcapital.consulttrack.repository.BudgetAnnuelRepository;
 import ma.cdgcapital.consulttrack.repository.ConsultantRepository;
 import ma.cdgcapital.consulttrack.repository.RapportActiviteRepository;
 import ma.cdgcapital.consulttrack.repository.TacheRealiseeRepository;
@@ -38,6 +39,7 @@ public class RapportActiviteService {
     @Autowired private TacheRealiseeRepository tacheRepository;
     @Autowired private ConsultantRepository consultantRepository;
     @Autowired private AffectationRepository affectationRepository;
+    @Autowired private BudgetAnnuelRepository budgetRepository;
     @Autowired private ma.cdgcapital.consulttrack.security.AccessGuard accessGuard;
 
     // ==========================================================
@@ -51,56 +53,63 @@ public class RapportActiviteService {
 
         YearMonth ym = YearMonth.of(annee, mois);
 
-        // Saisies de présence VALIDÉES sur BC pour l'ANNÉE (pour lister aussi
-        // les BC consommés dans l'année mais à 0 jour sur le mois demandé)
+        // Présences validées sur BC pour le mois demandé. Le détail du RA est
+        // mensuel : ne pas afficher les BC consommés dans un autre mois à 0 JH.
         List<TacheRealisee> saisiesAnnee = tacheRepository.findByConsultantId(consultantId).stream()
                 .filter(t -> t.getStatut() == StatutPointage.VALIDE)
                 .filter(t -> "BC".equals(t.getModeSaisie()))
                 .filter(t -> t.getBonDeCommande() != null)
-                .filter(t -> t.getDate() != null && t.getDate().getYear() == annee)
+                .filter(t -> t.getDate() != null && YearMonth.from(t.getDate()).equals(ym))
                 .filter(t -> t.getDuree() != null)
                 .toList();
 
-        // BDC utilisés : tout BC ayant une consommation validée dans l'année,
-        // avec la somme du mois demandé (éventuellement 0.0)
-        Map<String, Double> joursParBc = new LinkedHashMap<>();
-        Map<String, ma.cdgcapital.consulttrack.model.BonDeCommande> bcParReference = new LinkedHashMap<>();
+        // Une entrée par ligne BC (id), même si plusieurs lignes partagent la référence.
+        Map<Long, Double> joursParBc = new LinkedHashMap<>();
+        Map<Long, ma.cdgcapital.consulttrack.model.BonDeCommande> bcParId = new LinkedHashMap<>();
+        Map<Long, Set<String>> suggestionsParBc = new LinkedHashMap<>();
         double totalJH = 0.0;
         Set<String> suggestions = new LinkedHashSet<>();
 
         for (TacheRealisee t : saisiesAnnee) {
-            String reference = t.getBonDeCommande().getReference();
-            if (reference == null || reference.isBlank()) {
-                reference = "BC #" + t.getBonDeCommande().getId();
-            }
-            bcParReference.putIfAbsent(reference, t.getBonDeCommande());
-            boolean duMois = YearMonth.from(t.getDate()).equals(ym);
-            joursParBc.merge(reference, duMois ? t.getDuree() : 0.0, Double::sum);
-
-            if (duMois) {
-                totalJH += t.getDuree();
-                String description = t.getDescriptionTache();
-                if (description != null && !description.isBlank() && suggestions.size() < MAX_SUGGESTIONS) {
-                    suggestions.add(description.trim());
-                }
+            var bc = t.getBonDeCommande();
+            Long bcId = bc.getId();
+            bcParId.putIfAbsent(bcId, bc);
+            joursParBc.merge(bcId, t.getDuree(), Double::sum);
+            totalJH += t.getDuree();
+            String description = t.getDescriptionTache();
+            if (description != null && !description.isBlank()) {
+                String suggestion = description.trim();
+                suggestionsParBc.computeIfAbsent(bcId, ignored -> new LinkedHashSet<>()).add(suggestion);
+                if (suggestions.size() < MAX_SUGGESTIONS) suggestions.add(suggestion);
             }
         }
 
         List<RaBdcUtiliseDTO> bdcUtilises = new ArrayList<>();
-        for (Map.Entry<String, Double> entry : joursParBc.entrySet()) {
+        for (Map.Entry<Long, Double> entry : joursParBc.entrySet()) {
             RaBdcUtiliseDTO bdc = new RaBdcUtiliseDTO();
-            bdc.setReference(entry.getKey());
+            bdc.setBcId(entry.getKey());
+            ma.cdgcapital.consulttrack.model.BonDeCommande b = bcParId.get(entry.getKey());
+            String reference = b == null ? null : b.getReference();
+            bdc.setReference(reference == null || reference.isBlank() ? "BC #" + entry.getKey() : reference);
             bdc.setJours(entry.getValue());
-            ma.cdgcapital.consulttrack.model.BonDeCommande b = bcParReference.get(entry.getKey());
             if (b != null) {
                 bdc.setDesignation(b.getDesignation());
+                bdc.setTachesSuggerees(new ArrayList<>(suggestionsParBc.getOrDefault(entry.getKey(), Set.of())));
                 // Nature du BC ; à défaut, déduite de la désignation (run/maintenance/support → RUN)
                 if (b.getNature() != null) {
                     bdc.setNature(b.getNature().name());
                 } else {
-                    String d = (b.getDesignation() != null ? b.getDesignation() : "").toLowerCase();
-                    bdc.setNature(d.contains("run") || d.contains("maintenance") || d.contains("support")
-                            ? "RUN" : "PROJET");
+                    ma.cdgcapital.consulttrack.model.BudgetAnnuel budget = b.getAnneeBudgetaire() == null
+                            || b.getCodeBudget() == null ? null
+                            : budgetRepository.findByAnneeAndCodeBudget(b.getAnneeBudgetaire(), b.getCodeBudget()).orElse(null);
+                    String type = budget == null ? null : budget.getTypeBudget();
+                    if ("OPEX".equalsIgnoreCase(type)) bdc.setNature("RUN");
+                    else if ("CAPEX".equalsIgnoreCase(type)) bdc.setNature("PROJET");
+                    else {
+                        String d = (b.getDesignation() != null ? b.getDesignation() : "").toLowerCase();
+                        bdc.setNature(d.contains("run") || d.contains("maintenance") || d.contains("support")
+                                ? "RUN" : "PROJET");
+                    }
                 }
             }
             bdcUtilises.add(bdc);
@@ -197,6 +206,7 @@ public class RapportActiviteService {
         RapportActivite ra = rapportRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Rapport d'activité introuvable : " + id));
         accessGuard.assertConsultantDansPerimetre(viewer, ra.getConsultant());
+        assertEnAttenteValidation(ra);
         ra.setStatut(StatutPointage.VALIDE);
         ra.setMotifRejet(null);
         ra.setValidePar(validatorEmail != null
@@ -209,9 +219,16 @@ public class RapportActiviteService {
         RapportActivite ra = rapportRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("Rapport d'activité introuvable : " + id));
         accessGuard.assertConsultantDansPerimetre(viewer, ra.getConsultant());
+        assertEnAttenteValidation(ra);
         ra.setStatut(StatutPointage.REJETE);
         ra.setMotifRejet(motif);
         rapportRepository.save(ra);
+    }
+
+    private void assertEnAttenteValidation(RapportActivite ra) {
+        if (ra.getStatut() != StatutPointage.EN_ATTENTE) {
+            throw new BusinessException("Seul un rapport soumis peut être validé ou rejeté.");
+        }
     }
 
     // ==========================================================

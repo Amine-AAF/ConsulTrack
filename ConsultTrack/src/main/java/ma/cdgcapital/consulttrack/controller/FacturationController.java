@@ -36,11 +36,6 @@ public class FacturationController {
             @RequestParam int mois,
             Authentication auth) {
         Consultant viewer = accessGuard.currentUser(auth);
-        Set<Long> scope = null; // null = tout voir (ADMIN)
-        if (viewer.getRole() == Role.RESPONSABLE) {
-            scope = viewer.getCabinetsGeres() == null ? Set.of()
-                    : viewer.getCabinetsGeres().stream().map(Cabinet::getId).collect(Collectors.toSet());
-        }
-        return ResponseEntity.ok(facturationPrefactureService.getFacturationMensuelle(annee, mois, scope));
+        return ResponseEntity.ok(facturationPrefactureService.getFacturationMensuelle(annee, mois, viewer));
     }
 }

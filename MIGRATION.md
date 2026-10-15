@@ -11,6 +11,14 @@ Hibernate avec `ddl-auto=update` **ajoute** les colonnes mais **ne supprime jama
 DROP TABLE IF EXISTS jour_travaille CASCADE;
 ```
 
+### Mise à jour du suivi budgétaire et des périmètres
+
+Après déploiement des rôles manager et des budgets par direction, exécuter une fois
+`ConsultTrack/src/main/resources/db/migration/V20260926__budgets_directions_managers.sql`
+sur la base PostgreSQL utilisée par l’application, puis redémarrer le backend.
+Le script est réexécutable : il conserve les budgets existants en périmètre `POLE`,
+ajoute les colonnes de direction/manager, et adapte l’unicité des codes budgétaires.
+
 ## 🗑️ Code supprimé
 
 ### Backend
@@ -76,17 +84,9 @@ Endpoints exposés :
 
 Le `permitAll()` en dur (DEV) a été remplacé par cette vraie config.
 
-## 🗃️ Comptes de seed (DataInitializer)
+## 🗃️ Compte initial DEV
 
-Créés uniquement si la base est vide (idempotent) :
-
-| Email | Mot de passe | Rôle |
-|---|---|---|
-| `admin@cdgcapital.ma` | `admin123` | ADMIN |
-| `y.boutkhourst@coda.com` | `consultant123` | CONSULTANT |
-| `a.elkassimi@coda.com` | `consultant123` | CONSULTANT |
-
-⚠️ **À changer en prod**. Ces seeds sont uniquement pour le développement local.
+En profil `dev`, `DataInitializer` crée uniquement `admin@cdgcapital.ma` avec le mot de passe configuré par `app.seed.admin-password` si ce compte est absent. Aucun consultant ni aucune donnée métier fictive n'est créé. Changez le mot de passe avant tout usage partagé.
 
 ## 🚀 Vérification post-déploiement
 

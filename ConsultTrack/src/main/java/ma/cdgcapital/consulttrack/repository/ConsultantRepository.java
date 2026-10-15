@@ -10,4 +10,5 @@ import java.util.Optional;
 public interface ConsultantRepository extends JpaRepository<Consultant, Long> {
 
     Optional<Consultant> findByEmail(String email);
+    java.util.List<Consultant> findByManager_Id(Long managerId);
 }

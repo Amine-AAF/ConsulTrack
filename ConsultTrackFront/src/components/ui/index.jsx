@@ -59,12 +59,12 @@ export const Button = ({ variant = 'primary', children, className = '', ...props
 
 /** Onglets horizontaux. tabs = [{key, label, count?}] */
 export const Tabs = ({ tabs, active, onChange }) => (
-    <div className="flex gap-1 bg-gray-100 p-1 rounded-xl mb-5 w-fit flex-wrap">
+    <div className="mb-5 flex w-fit max-w-full flex-nowrap gap-1 overflow-x-auto rounded-xl bg-gray-100 p-1">
         {tabs.map((t) => (
             <button
                 key={t.key}
                 onClick={() => onChange(t.key)}
-                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all ${
                     active === t.key ? 'bg-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
                 }`}
                 style={active === t.key ? { color: COLORS.blue } : {}}

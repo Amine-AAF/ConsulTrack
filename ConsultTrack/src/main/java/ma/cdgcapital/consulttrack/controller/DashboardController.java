@@ -49,6 +49,15 @@ public class DashboardController {
                 .stream().map(EntityMapper::toDto).toList());
     }
 
+    /** Bons de commande pointables du consultant authentifié. */
+    @GetMapping("/dashboard/consultants/{consultantId}/bcs")
+    public ResponseEntity<List<BonDeCommandeDTO>> getConsultantBCs(
+            @PathVariable Long consultantId, Authentication auth) {
+        accessGuard.assertOwnership(auth, consultantId);
+        return ResponseEntity.ok(dashboardService.getBCsForConsultant(consultantId).stream()
+                .map(EntityMapper::toDto).toList());
+    }
+
     // ==========================================
     // 2. SAISIE DES TEMPS (Écriture)
     // ==========================================
@@ -180,8 +189,8 @@ public class DashboardController {
     }
 
     @PostMapping("/admin/bcs")
-    public ResponseEntity<BonDeCommandeDTO> createBC(@RequestBody BonDeCommande bc) {
-        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.saveBC(bc)));
+    public ResponseEntity<BonDeCommandeDTO> createBC(@RequestBody BonDeCommande bc, Authentication auth) {
+        return ResponseEntity.ok(EntityMapper.toDto(dashboardService.saveBC(bc, accessGuard.currentUser(auth))));
     }
 
     /** Report du reliquat sur l'année suivante — décision ADMIN/RESPONSABLE (scopé). */

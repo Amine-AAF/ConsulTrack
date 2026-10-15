@@ -28,6 +28,16 @@ public class Consultant {
     @Enumerated(EnumType.STRING)
     private Role role;
 
+    /** Direction organisationnelle (distincte du cabinet fournisseur/ESN). */
+    @ManyToOne
+    @JoinColumn(name = "direction_id")
+    private Direction direction;
+
+    /** Manager propriétaire du périmètre consultant. */
+    @ManyToOne
+    @JoinColumn(name = "manager_id")
+    private Consultant manager;
+
     @ManyToOne
     @JoinColumn(name = "cabinet_id")
     private Cabinet cabinet;

@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import {
     Building2, Users, FileStack, ShieldCheck, Landmark,
     CalendarDays, Plus, Trash2, AlertCircle, KeyRound, Mail,
-    Pencil, X, Save, Image as ImageIcon, UserX, RotateCcw,
+    Pencil, X, Save, Image as ImageIcon, UserX, RotateCcw, Search, Filter, ChevronDown,
 } from 'lucide-react';
 import {
     PageHeader, Button, Tabs, Card, BudgetGauge, COLORS,
 } from './ui/index.jsx';
+import BudgetManagement from './BudgetManagement.jsx';
 
 /* ============================================================
    Console d'administration — Référentiel uniquement
@@ -15,8 +17,8 @@ import {
    ============================================================ */
 
 const ROLE_STYLES = {
-    ADMIN: { bg: '#fee2e2', fg: COLORS.red, label: 'Admin' },
-    RESPONSABLE: { bg: '#e0e7ff', fg: '#4338ca', label: 'Responsable' },
+    ADMIN: { bg: '#fee2e2', fg: COLORS.red, label: 'Superadmin' },
+    RESPONSABLE: { bg: '#e0e7ff', fg: '#4338ca', label: 'Manager' },
     CONSULTANT: { bg: '#dcfce7', fg: '#15803d', label: 'Consultant' },
 };
 
@@ -43,48 +45,71 @@ const getErr = (err) => err.response?.data?.message || 'Une erreur est survenue.
 
 const AdminPanel = ({ userRole }) => {
     const isAdmin = userRole === 'ADMIN';
+    const canSeeBudgets = isAdmin || userRole === 'RESPONSABLE';
+    const [searchParams, setSearchParams] = useSearchParams();
     const [activeTab, setActiveTab] = useState('cabinets');
+    const requestedTab = searchParams.get('tab');
 
     const [cabinets, setCabinets] = useState([]);
     const [consultants, setConsultants] = useState([]);
     const [bcs, setBcs] = useState([]);
+    const [directions, setDirections] = useState([]);
     const [loading, setLoading] = useState(true);
 
     const tabs = [
+        ...(canSeeBudgets ? [{ key: 'budgets', label: 'Budgets annuels' }] : []),
         { key: 'cabinets', label: 'Cabinets' },
         { key: 'users', label: 'Utilisateurs' },
+        ...(isAdmin ? [{ key: 'directions', label: 'Directions' }] : []),
         { key: 'bcs', label: 'Bons de Commande' },
         ...(isAdmin ? [{ key: 'feries', label: 'Jours fériés' }] : []),
     ];
 
+    useEffect(() => {
+        const validTabs = tabs.map((tab) => tab.key);
+        if (!requestedTab) setActiveTab('cabinets');
+        else if (validTabs.includes(requestedTab)) setActiveTab(requestedTab);
+        else {
+            setActiveTab('cabinets');
+            setSearchParams({}, { replace: true });
+        }
+    }, [requestedTab, isAdmin, canSeeBudgets, setSearchParams]);
+
+    const changeTab = (key) => {
+        setActiveTab(key);
+        setSearchParams(key === 'cabinets' ? {} : { tab: key });
+    };
+
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const [cabRes, consRes, bcRes] = await Promise.all([
+            const [cabRes, consRes, bcRes, dirRes] = await Promise.all([
                 api.get('/admin/cabinets'),
                 api.get('/admin/consultants'),
                 api.get('/admin/bcs'),
+                isAdmin ? api.get('/admin/directions') : Promise.resolve({ data: [] }),
             ]);
             setCabinets(cabRes.data);
             setConsultants(consRes.data);
             setBcs(bcRes.data);
+            setDirections(dirRes.data || []);
         } catch (err) {
             console.error('Erreur chargement référentiel', err);
         }
         setLoading(false);
-    }, []);
+    }, [isAdmin]);
 
     useEffect(() => { loadData(); }, [loadData]);
 
     return (
         <div className="mx-auto max-w-7xl p-4">
-            <PageHeader
+            {activeTab !== 'budgets' && <PageHeader
                 icon={ShieldCheck}
-                title="Administration"
-                subtitle="Référentiel : cabinets, utilisateurs, bons de commande et jours fériés"
-            />
+                title={({ cabinets: 'Cabinets fournisseurs', users: 'Consultants et utilisateurs', bcs: 'Bons de commande', directions: 'Directions', feries: 'Jours fériés' })[activeTab] || 'Gestion'}
+                subtitle={userRole === 'RESPONSABLE' ? 'Gestion limitée aux consultants et ressources de votre périmètre.' : 'Référentiels et ressources du Pôle IT.'}
+            />}
 
-            <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
+            <Tabs tabs={tabs} active={activeTab} onChange={changeTab} />
 
             {loading ? (
                 <div className="text-center p-20 font-bold animate-pulse" style={{ color: COLORS.blue }}>
@@ -92,17 +117,31 @@ const AdminPanel = ({ userRole }) => {
                 </div>
             ) : (
                 <>
+                    {activeTab === 'budgets' && canSeeBudgets && <BudgetManagement isAdmin={isAdmin} directions={directions} />}
                     {activeTab === 'cabinets' && <CabinetSection cabinets={cabinets} onRefresh={loadData} />}
                     {activeTab === 'users' && (
-                        <UserSection consultants={consultants} cabinets={cabinets}
+                        <UserSection consultants={consultants} cabinets={cabinets} directions={directions}
                                      onRefresh={loadData} isAdmin={isAdmin} />
                     )}
+                    {activeTab === 'directions' && isAdmin && <DirectionSection directions={directions} onRefresh={loadData} />}
                     {activeTab === 'bcs' && <BCSection bcs={bcs} consultants={consultants} onRefresh={loadData} />}
                     {activeTab === 'feries' && isAdmin && <JoursFeriesSection />}
                 </>
             )}
         </div>
     );
+};
+
+const DirectionSection = ({ directions, onRefresh }) => {
+    const [nom, setNom] = useState('');
+    const [error, setError] = useState('');
+    const [busy, setBusy] = useState(false);
+    const save = async (e) => {
+        e.preventDefault(); setError(''); setBusy(true);
+        try { await api.post('/admin/directions', { nom }); setNom(''); onRefresh(); }
+        catch (err) { setError(getErr(err)); } finally { setBusy(false); }
+    };
+    return <div className="space-y-4"><Card><h3 className="font-black mb-3" style={{ color: COLORS.blue }}>Directions organisationnelles</h3><p className="text-sm text-gray-500 mb-4">Les managers et consultants sont rattachés à une direction. Le cabinet fournisseur reste distinct.</p><ErrorBanner message={error} /><form onSubmit={save} className="flex gap-2"><input className={inputCls} value={nom} onChange={e => setNom(e.target.value)} placeholder="Nom de la direction" required /><Button disabled={busy}><Plus size={15} /> Ajouter</Button></form></Card><Card>{directions.length ? directions.map(d => <div key={d.id} className="py-2 border-b last:border-0 font-bold">{d.nom}</div>) : <p className="text-sm text-gray-400">Aucune direction créée.</p>}</Card></div>;
 };
 
 /* ==========================================
@@ -297,8 +336,8 @@ const CabinetSection = ({ cabinets, onRefresh }) => {
    RESPONSABLE : rôle verrouillé CONSULTANT, cabinets limités
    à ses cabinets gérés (listes scopées côté serveur).
    ========================================== */
-const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
-    const emptyForm = { nom: '', prenom: '', email: '', password: '', role: 'CONSULTANT', cabinetId: '', cabinetsGeresIds: [] };
+const UserSection = ({ consultants, cabinets, directions = [], onRefresh, isAdmin = true }) => {
+    const emptyForm = { nom: '', prenom: '', email: '', password: '', role: 'CONSULTANT', cabinetId: '', directionId: '', managerId: '', cabinetsGeresIds: [] };
     const [form, setForm] = useState(emptyForm);
     const [editingId, setEditingId] = useState(null);
     // En édition : n'écrase les cabinets gérés que si la sélection a été modifiée
@@ -325,6 +364,8 @@ const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
             password: '',
             role: isAdmin ? (c.role || 'CONSULTANT') : 'CONSULTANT',
             cabinetId: c.cabinet?.id != null ? String(c.cabinet.id) : '',
+            directionId: c.directionId != null ? String(c.directionId) : '',
+            managerId: c.managerId != null ? String(c.managerId) : '',
             cabinetsGeresIds: [],
         });
         setGeresTouched(false);
@@ -353,6 +394,10 @@ const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
             setError('Le cabinet est obligatoire pour un consultant.');
             return;
         }
+        if (isAdmin && form.role === 'RESPONSABLE' && !form.directionId) {
+            setError('La direction est obligatoire pour un manager.');
+            return;
+        }
         setSaving(true);
         try {
             const payload = {
@@ -362,6 +407,8 @@ const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
                 // Un RESPONSABLE ne crée/modifie que des comptes CONSULTANT (imposé aussi côté serveur)
                 role: isAdmin ? form.role : 'CONSULTANT',
                 cabinet: form.cabinetId ? { id: parseInt(form.cabinetId, 10) } : null,
+                ...(isAdmin && form.directionId ? { direction: { id: parseInt(form.directionId, 10) } } : {}),
+                ...(isAdmin && form.role === 'CONSULTANT' && form.managerId ? { manager: { id: parseInt(form.managerId, 10) } } : {}),
             };
             if (form.password) payload.password = form.password; // vide en édition = conservé
             if (editingId) {
@@ -440,8 +487,8 @@ const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
                         <select className={inputCls} value={form.role}
                                 onChange={e => setForm({ ...form, role: e.target.value })}>
                             <option value="CONSULTANT">Consultant</option>
-                            <option value="RESPONSABLE">Responsable</option>
-                            <option value="ADMIN">Admin</option>
+                            <option value="RESPONSABLE">Manager</option>
+                            <option value="ADMIN">Superadmin</option>
                         </select>
                     ) : (
                         <div className={`${inputCls} flex items-center justify-between bg-gray-50 text-gray-500`}>
@@ -456,6 +503,8 @@ const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
                         </option>
                         {cabinets.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
                     </select>
+                    {isAdmin && <select className={inputCls} required={form.role === 'RESPONSABLE'} value={form.directionId} onChange={e => setForm({ ...form, directionId: e.target.value })}><option value="">{form.role === 'RESPONSABLE' ? 'Direction *' : 'Direction (optionnelle)'}</option>{directions.map(d => <option key={d.id} value={d.id}>{d.nom}</option>)}</select>}
+                    {isAdmin && form.role === 'CONSULTANT' && <select className={inputCls} value={form.managerId} onChange={e => setForm({ ...form, managerId: e.target.value })}><option value="">Manager propriétaire (optionnel)</option>{consultants.filter(c => c.role === 'RESPONSABLE' && c.id !== editingId).map(c => <option key={c.id} value={c.id}>{c.prenom} {c.nom}</option>)}</select>}
                 </div>
 
                 {isAdmin && form.role === 'RESPONSABLE' && (
@@ -574,25 +623,10 @@ const UserSection = ({ consultants, cabinets, onRefresh, isAdmin = true }) => {
 /* ==========================================
    3. BONS DE COMMANDE
    ========================================== */
-/** Nature dérivée du code budgétaire : R… → RUN, P… → PROJET, sinon null. */
-const natureFromCode = (code) => {
-    const first = (code || '').trim().charAt(0).toUpperCase();
-    if (first === 'R') return 'RUN';
-    if (first === 'P') return 'PROJET';
-    return null;
-};
+const natureForBudgetType = (typeBudget) => typeBudget === 'OPEX' ? 'RUN' : typeBudget === 'CAPEX' ? 'PROJET' : null;
 
-const NatureChip = ({ code }) => {
-    if (!(code || '').trim()) return null;
-    const nature = natureFromCode(code);
-    if (!nature) {
-        return (
-            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full"
-                  style={{ backgroundColor: '#fee2e2', color: COLORS.red }}>
-                Code invalide (R… ou P…)
-            </span>
-        );
-    }
+const NatureChip = ({ nature }) => {
+    if (!nature) return <span className="text-[10px] font-bold text-gray-400">Nature non définie</span>;
     return (
         <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full"
               style={nature === 'RUN'
@@ -607,8 +641,24 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
     const currentYear = new Date().getFullYear();
     const emptyForm = { reference: '', joursMax: '', tjm: '', codeBudget: '', anneeBudgetaire: String(currentYear), designation: '', consultantId: '' };
     const [form, setForm] = useState(emptyForm);
+    const [budgets, setBudgets] = useState([]);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
+    const [yearFilter, setYearFilter] = useState(String(currentYear));
+    const [cabinetFilter, setCabinetFilter] = useState('');
+    const [consultantFilter, setConsultantFilter] = useState('');
+    const [search, setSearch] = useState('');
+    const [visibleCabinetCount, setVisibleCabinetCount] = useState(6);
+
+    useEffect(() => {
+        api.get(`/admin/budgets?annee=${form.anneeBudgetaire || currentYear}`)
+            .then((res) => setBudgets(res.data || []))
+            .catch(() => setBudgets([]));
+    }, [form.anneeBudgetaire, currentYear]);
+
+    const selectedBudget = budgets.find((b) => b.codeBudget === form.codeBudget);
+
+    useEffect(() => { setVisibleCabinetCount(6); }, [yearFilter, cabinetFilter, consultantFilter, search]);
 
     const save = async () => {
         setError('');
@@ -620,8 +670,8 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
             setError('Le code budgétaire est obligatoire.');
             return;
         }
-        if (!natureFromCode(form.codeBudget)) {
-            setError('Code budgétaire invalide : il doit commencer par R (RUN) ou P (PROJET).');
+        if (!selectedBudget) {
+            setError('Sélectionne un budget existant pour rattacher correctement le BC.');
             return;
         }
         setSaving(true);
@@ -651,6 +701,35 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
     };
 
     const consultantsOnly = consultants.filter(c => !c.role || c.role === 'CONSULTANT');
+    const consultantById = new Map(consultantsOnly.map(c => [String(c.id), c]));
+    const bcYears = [...new Set([currentYear, ...bcs.map(bc => bc.anneeBudgetaire).filter(Number.isInteger)])].sort((a, b) => b - a);
+    const cabinetNameFor = (bc) => consultantById.get(String(bc.consultantId ?? bc.consultant?.id))?.cabinet?.nom || 'Sans cabinet';
+    const cabinetOptions = [...new Set([...consultantsOnly.map(c => c.cabinet?.nom).filter(Boolean), ...(bcs.some(bc => !consultantById.get(String(bc.consultantId ?? bc.consultant?.id))?.cabinet?.nom) ? ['Sans cabinet'] : [])])].sort((a, b) => a.localeCompare(b));
+    const consultantOptions = consultantsOnly.filter(c => !cabinetFilter || c.cabinet?.nom === cabinetFilter);
+    const filteredBcs = bcs.filter((bc) => {
+        const matchesYear = yearFilter === 'ALL' || (yearFilter === 'UNKNOWN'
+            ? bc.anneeBudgetaire == null : bc.anneeBudgetaire === Number(yearFilter));
+        const consultant = consultantById.get(String(bc.consultantId ?? bc.consultant?.id));
+        const name = consultant ? `${consultant.prenom || ''} ${consultant.nom || ''}`.trim() : 'Non affecté';
+        const text = `${bc.reference || ''} ${bc.codeBudget || ''} ${bc.designation || ''} ${name}`.toLocaleLowerCase('fr');
+        return matchesYear && (!cabinetFilter || cabinetNameFor(bc) === cabinetFilter)
+            && (!consultantFilter || String(bc.consultantId ?? bc.consultant?.id) === consultantFilter)
+            && (!search.trim() || text.includes(search.trim().toLocaleLowerCase('fr')));
+    });
+    const cabinetGroups = Object.values(filteredBcs.reduce((groups, bc) => {
+        const cabinet = cabinetNameFor(bc);
+        const consultantId = String(bc.consultantId ?? bc.consultant?.id ?? 'unassigned');
+        groups[cabinet] ||= { name: cabinet, consultants: {} };
+        groups[cabinet].consultants[consultantId] ||= {
+            id: consultantId,
+            name: consultantById.get(consultantId)
+                ? `${consultantById.get(consultantId).prenom || ''} ${consultantById.get(consultantId).nom || ''}`.trim()
+                : 'Non affecté',
+            bcs: [],
+        };
+        groups[cabinet].consultants[consultantId].bcs.push(bc);
+        return groups;
+    }, {})).sort((a, b) => a.name.localeCompare(b.name));
 
     return (
         <div className="space-y-6">
@@ -667,12 +746,18 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
                     <input className={inputCls} type="number" min="0" placeholder="TJM (MAD)" value={form.tjm}
                            onChange={e => setForm({ ...form, tjm: e.target.value })} />
                     <div className="flex items-center gap-2">
-                        <input className={inputCls} required placeholder="Code budgétaire * (R-xxxx ou P-xxxx)" value={form.codeBudget}
-                               onChange={e => setForm({ ...form, codeBudget: e.target.value })} />
-                        <NatureChip code={form.codeBudget} />
+                        <select className={inputCls} required value={form.codeBudget}
+                                onChange={e => setForm({ ...form, codeBudget: e.target.value })}>
+                            <option value="">Budget associé *</option>
+                            {budgets.map((b) => <option key={b.id} value={b.codeBudget}>{b.codeBudget} · {b.typeBudget || 'Type à préciser'} · {b.description || 'Sans description'}</option>)}
+                        </select>
+                        {selectedBudget && <div className="flex items-center gap-2 text-xs text-gray-600"><span>{selectedBudget.typeBudget}</span><span>→</span><NatureChip nature={natureForBudgetType(selectedBudget.typeBudget)} /><span>dans les RA</span></div>}
                     </div>
-                    <input className={inputCls} type="number" placeholder="Année budgétaire" value={form.anneeBudgetaire}
-                           onChange={e => setForm({ ...form, anneeBudgetaire: e.target.value })} />
+                    <label className="text-xs font-bold text-gray-600">Exercice de suivi
+                        <input className={inputCls} type="number" placeholder="Ex. 2026" value={form.anneeBudgetaire}
+                               onChange={e => setForm({ ...form, anneeBudgetaire: e.target.value, codeBudget: '' })} />
+                        <span className="block mt-1 font-normal text-gray-500">Indépendant de l’année dans la référence : un BC /19/ peut porter un reliquat suivi en 2026.</span>
+                    </label>
                     <input className={inputCls} placeholder="Désignation" value={form.designation}
                            onChange={e => setForm({ ...form, designation: e.target.value })} />
                     <select className={inputCls} value={form.consultantId}
@@ -688,55 +773,53 @@ const BCSection = ({ bcs, consultants, onRefresh }) => {
                 </div>
             </Card>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {bcs.length === 0 ? (
-                    <Card className="col-span-full text-center text-gray-400 italic">Aucun bon de commande.</Card>
-                ) : bcs.map(bc => (
-                    <Card key={bc.id}>
-                        <div className="flex justify-between items-start mb-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <div className="font-black text-lg" style={{ color: COLORS.blue }}>{bc.reference}</div>
-                                {bc.nature && (
-                                    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full"
-                                          style={bc.nature === 'RUN'
-                                              ? { backgroundColor: '#e0e7ff', color: '#4338ca' }
-                                              : { backgroundColor: '#dcfce7', color: '#15803d' }}>
-                                        {bc.nature}
-                                    </span>
-                                )}
-                            </div>
-                            {bc.tjm != null && (
-                                <span className="text-[11px] font-black px-2 py-1 rounded-full"
-                                      style={{ backgroundColor: '#fdf6e9', color: COLORS.gold }}>
-                                    {Number(bc.tjm).toLocaleString('fr-FR')} MAD/J
-                                </span>
-                            )}
+            <Card>
+                <div className="mb-4 flex items-center gap-2 font-black" style={{ color: COLORS.blue }}><Filter size={17} style={{ color: COLORS.green }} /> Filtrer les bons de commande</div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <label className="text-xs font-bold text-gray-500">Année budgétaire<select className={inputCls} value={yearFilter} onChange={e => setYearFilter(e.target.value)}>
+                        <option value="ALL">Toutes les années</option>{bcYears.map(y => <option key={y} value={y}>{y}</option>)}{bcs.some(bc => bc.anneeBudgetaire == null) && <option value="UNKNOWN">Année non précisée</option>}
+                    </select></label>
+                    <label className="text-xs font-bold text-gray-500">Cabinet<select className={inputCls} value={cabinetFilter} onChange={e => { setCabinetFilter(e.target.value); setConsultantFilter(''); }}><option value="">Tous les cabinets</option>{cabinetOptions.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+                    <label className="text-xs font-bold text-gray-500">Consultant<select className={inputCls} value={consultantFilter} onChange={e => setConsultantFilter(e.target.value)}><option value="">Tous les consultants</option>{consultantOptions.map(c => <option key={c.id} value={c.id}>{c.prenom} {c.nom}</option>)}</select></label>
+                    <label className="text-xs font-bold text-gray-500">Recherche<input className={inputCls} value={search} onChange={e => setSearch(e.target.value)} placeholder="Référence, code, désignation…" /></label>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm"><span className="font-bold text-gray-500">{filteredBcs.length} BC affiché{filteredBcs.length !== 1 ? 's' : ''} sur {bcs.length}</span><Button variant="outline" onClick={() => { setYearFilter(String(currentYear)); setCabinetFilter(''); setConsultantFilter(''); setSearch(''); }}>Réinitialiser</Button></div>
+            </Card>
+
+            {cabinetGroups.length === 0 ? <Card className="py-10 text-center text-gray-500">Aucun BC ne correspond à ces filtres.</Card> : (
+                <div className="space-y-5">{cabinetGroups.slice(0, visibleCabinetCount).map((cabinet) => {
+                    const consultantGroups = Object.values(cabinet.consultants).sort((a, b) => a.name.localeCompare(b.name));
+                    const cabinetBcCount = consultantGroups.reduce((sum, c) => sum + c.bcs.length, 0);
+                    return <Card key={cabinet.name} className="!p-0 overflow-hidden">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-slate-50 px-5 py-4">
+                            <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-white text-[#008858]"><Building2 size={19} /></span><div><h3 className="font-black text-[#003366]">{cabinet.name}</h3><p className="text-xs text-gray-500">{consultantGroups.length} consultant{consultantGroups.length !== 1 ? 's' : ''} · {cabinetBcCount} BC</p></div></div>
+                            <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-gray-500">{yearFilter === 'ALL' ? 'Toutes années' : yearFilter === 'UNKNOWN' ? 'Année non précisée' : yearFilter}</span>
                         </div>
-                        <div className="text-xs text-gray-400 font-bold mb-1">
-                            {bc.codeBudget || '—'}
-                            {bc.anneeBudgetaire ? ` · ${bc.anneeBudgetaire}` : ''}
-                        </div>
-                        {bc.designation && <div className="text-xs text-gray-500 mb-2">{bc.designation}</div>}
-                        <div className="text-sm font-bold mb-3" style={{ color: COLORS.gold }}>
-                            {bc.consultant ? `${bc.consultant.nom} ${bc.consultant.prenom || ''}` : 'Non affecté'}
-                        </div>
-                        <BudgetGauge label="Consommation" consomme={bc.joursConsommes ?? 0} max={bc.joursMax ?? 0} />
-                        {bc.anneeBudgetaire != null && bc.anneeBudgetaire < currentYear
-                            && ((bc.joursMax ?? 0) - (bc.joursConsommes ?? 0)) > 0 && (
-                            <button
-                                onClick={() => toggleReport(bc)}
-                                className="mt-3 w-full text-xs font-black px-3 py-2 rounded-xl border transition-all"
-                                style={bc.reportReliquat
-                                    ? { backgroundColor: '#f0fdf4', borderColor: COLORS.green, color: COLORS.green }
-                                    : { backgroundColor: '#fff', borderColor: '#e5e7eb', color: '#6b7280' }}>
-                                {bc.reportReliquat
-                                    ? `✓ Reliquat reporté sur ${bc.anneeBudgetaire + 1} — cliquer pour annuler`
-                                    : `Autoriser le report du reliquat sur ${bc.anneeBudgetaire + 1}`}
-                            </button>
-                        )}
-                    </Card>
-                ))}
-            </div>
+                        <div className="space-y-3 p-4 sm:p-5">{consultantGroups.map((group) => {
+                            const totalMax = group.bcs.reduce((sum, bc) => sum + (bc.joursMax || 0), 0);
+                            const totalConsumed = group.bcs.reduce((sum, bc) => sum + (bc.joursConsommes || 0), 0);
+                            return <details key={group.id} className="group/consultant rounded-xl border border-gray-200 bg-white">
+                                <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 p-4 hover:bg-gray-50">
+                                    <div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-blue-50 text-[#003366]"><Users size={16} /></span><div><div className="font-black text-[#003366]">{group.name}</div><div className="text-xs text-gray-500">{group.bcs.length} bon{group.bcs.length !== 1 ? 's' : ''} de commande</div></div></div>
+                                    <div className="flex items-center gap-4 text-xs"><span className="font-bold text-gray-500">{totalConsumed.toLocaleString('fr-FR')} / {totalMax.toLocaleString('fr-FR')} JH</span><ChevronDown size={16} className="text-gray-400 transition-transform group-open/consultant:rotate-180" /></div>
+                                </summary>
+                                <div className="grid grid-cols-1 gap-3 border-t border-gray-100 bg-slate-50/70 p-3 md:grid-cols-2">
+                                    {[...group.bcs].sort((a, b) => String(a.reference || '').localeCompare(String(b.reference || ''))).map(bc => <div key={bc.id} className="rounded-xl border border-gray-100 bg-white p-4">
+                                        <div className="mb-2 flex flex-wrap items-start justify-between gap-2"><div><div className="font-black text-[#003366]">{bc.reference || 'BC sans référence'}</div><div className="mt-1 text-xs text-gray-500">{bc.codeBudget || 'Code non précisé'} · Exercice suivi {bc.anneeBudgetaire ?? 'non précisé'}</div></div><NatureChip nature={bc.nature} /></div>
+                                        {bc.designation && <p className="mb-3 text-sm text-gray-600">{bc.designation}</p>}
+                                        {bc.tjm != null && <p className="mb-2 text-xs font-bold text-gray-500">TJM : {Number(bc.tjm).toLocaleString('fr-FR')} MAD/J</p>}
+                                        <BudgetGauge label="Consommation annuelle" consomme={bc.joursConsommes ?? 0} max={bc.joursMax ?? 0} />
+                                        {bc.anneeBudgetaire != null && bc.anneeBudgetaire < currentYear && ((bc.joursMax ?? 0) - (bc.joursConsommes ?? 0)) > 0 && <button onClick={() => toggleReport(bc)} className="mt-3 w-full rounded-xl border px-3 py-2 text-xs font-black transition-all" style={bc.reportReliquat ? { backgroundColor: '#f0fdf4', borderColor: COLORS.green, color: COLORS.green } : { backgroundColor: '#fff', borderColor: '#e5e7eb', color: '#6b7280' }}>{bc.reportReliquat ? `✓ Reliquat reporté sur ${bc.anneeBudgetaire + 1}` : `Autoriser le report sur ${bc.anneeBudgetaire + 1}`}</button>}
+                                    </div>)}
+                                </div>
+                            </details>;
+                        })}</div>
+                    </Card>;
+                })}
+                    {cabinetGroups.length > visibleCabinetCount && <div className="flex justify-center pt-2"><Button variant="outline" onClick={() => setVisibleCabinetCount(count => count + 6)}>Afficher les {Math.min(6, cabinetGroups.length - visibleCabinetCount)} cabinets suivants ({cabinetGroups.length - visibleCabinetCount} restants)</Button></div>}
+                    {visibleCabinetCount > 6 && <div className="flex justify-center"><Button variant="outline" onClick={() => { setVisibleCabinetCount(6); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Réduire la liste</Button></div>}
+                </div>
+            )}
         </div>
     );
 };

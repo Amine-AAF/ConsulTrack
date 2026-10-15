@@ -8,6 +8,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ConsultantDashboardDTO {
+    private Long consultantId;
+    private Long directionId;
+    private Long managerId;
     private String nomConsultant;
     private String nomCabinet; // Changé pour correspondre au service
     private String mission;

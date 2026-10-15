@@ -25,7 +25,7 @@ public class RapportActivite {
     /**
      * Tâches réalisées du mois : lignes (puces) séparées par '\n'.
      */
-    @Column(length = 8000)
+    @Column(length = 10000)
     private String tachesRealisees;
 
     @Enumerated(EnumType.STRING)

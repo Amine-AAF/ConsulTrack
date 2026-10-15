@@ -26,6 +26,8 @@ public class RpiMensuelDTO {
 
     /** VIDE | BROUILLON | EN_ATTENTE | VALIDE | MIXTE (agrégat des statuts des saisies du mois) */
     private String statutMois;
+    /** Vrai lorsque le RPI provient d'un relevé externe importé. */
+    private Boolean sourceExterne;
 
     private List<RpiBcLigneDTO> bcs;
     private List<RpiSemaineDTO> semaines;

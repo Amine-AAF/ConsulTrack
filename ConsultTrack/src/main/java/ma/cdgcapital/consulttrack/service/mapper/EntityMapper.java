@@ -33,7 +33,10 @@ public final class EntityMapper {
                 c.getRole() != null ? c.getRole().name() : null,
                 toDto(c.getCabinet()),
                 c.getActif() == null ? Boolean.TRUE : c.getActif(),
-                c.getDateFinMission());
+                c.getDateFinMission(),
+                c.getDirection() == null ? null : c.getDirection().getId(),
+                c.getDirection() == null ? null : c.getDirection().getNom(),
+                c.getManager() == null ? null : c.getManager().getId());
     }
 
     public static BonDeCommandeDTO toDto(BonDeCommande bc) {

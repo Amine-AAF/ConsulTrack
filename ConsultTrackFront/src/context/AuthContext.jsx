@@ -31,7 +31,9 @@ export const AuthProvider = ({ children }) => {
             setUser(userData);
             return { success: true, role: userData.role };
         } catch (error) {
-            const message = error.response?.data?.message || 'Identifiants incorrects';
+            const message = error.response
+                ? (error.response.data?.message || 'Identifiants incorrects')
+                : 'Serveur inaccessible. Vérifiez que le backend est démarré sur le port 8081.';
             return { success: false, message };
         }
     };

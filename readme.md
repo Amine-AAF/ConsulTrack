@@ -15,6 +15,9 @@
 * **Validation :** Workflow de validation ou de rejet des CRA et des absences (avec validation atomique de mois entier).
 * **Gestion Administrative :** CRUD pour les Consultants, Cabinets (ESN) et Bons de Commande.
 * **Historique :** Accès à l'historique complet des activités et génération des PDF pour n'importe quelle période.
+* **Gestion des budgets annuels :** Saisie ou import Excel des enveloppes budgétaires, suivi des DA déjà validées en externe et association du BC émis.
+
+L'import Excel lit les feuilles `Budgets` et `DA v2` (ou `DA Consultants`). Les montants du budget sont conservés comme un état saisi/importé ; les BC liés restent utilisables dans les CRA consultants.
 
 ---
 
@@ -53,9 +56,10 @@ cd ConsultTrack
 mvn spring-boot:run     # port 8081
 ```
 
-Au premier démarrage, les seeds sont créés automatiquement :
-- Admin : `admin@cdgcapital.ma` / `admin123`
-- Consultants : `y.boutkhourst@coda.com`, `a.elkassimi@coda.com` / `consultant123`
+En profil `dev`, un compte Superadmin est créé s'il n'existe pas :
+- `admin@cdgcapital.ma` / `admin123` (à modifier avant tout usage partagé)
+
+Les consultants, budgets, BC, pointages et rapports ne sont plus générés avec des données de démonstration. Ils doivent provenir des données réelles ou être saisis dans l'application.
 
 ### 3. Frontend
 

@@ -4,11 +4,13 @@ import ma.cdgcapital.consulttrack.dto.FacturationCabinetDTO;
 import ma.cdgcapital.consulttrack.dto.FacturationConsultantDTO;
 import ma.cdgcapital.consulttrack.dto.FacturationLigneDTO;
 import ma.cdgcapital.consulttrack.model.BonDeCommande;
+import ma.cdgcapital.consulttrack.model.BudgetAnnuel;
 import ma.cdgcapital.consulttrack.model.Cabinet;
 import ma.cdgcapital.consulttrack.model.Consultant;
 import ma.cdgcapital.consulttrack.model.StatutPointage;
 import ma.cdgcapital.consulttrack.model.TacheRealisee;
 import ma.cdgcapital.consulttrack.repository.TacheRealiseeRepository;
+import ma.cdgcapital.consulttrack.repository.BudgetAnnuelRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -30,13 +32,13 @@ import java.util.Set;
 public class FacturationPrefactureService {
 
     @Autowired private TacheRealiseeRepository tacheRepository;
+    @Autowired private BudgetAnnuelRepository budgetRepository;
 
     /**
      * @param cabinetsAutorises null = tous les cabinets (ADMIN) ;
      *                          sinon ids des cabinets gérés (RESPONSABLE).
      */
-    public List<FacturationCabinetDTO> getFacturationMensuelle(int annee, int mois,
-                                                               Set<Long> cabinetsAutorises) {
+    public List<FacturationCabinetDTO> getFacturationMensuelle(int annee, int mois, Consultant viewer) {
         List<TacheRealisee> taches = tacheRepository.findByStatut(StatutPointage.VALIDE).stream()
                 .filter(t -> "BC".equalsIgnoreCase(t.getModeSaisie()))
                 .filter(t -> t.getBonDeCommande() != null && t.getConsultant() != null)
@@ -57,11 +59,13 @@ public class FacturationPrefactureService {
             Cabinet cabinet = consultant.getCabinet();
             Long cabinetId = cabinet != null ? cabinet.getId() : null;
 
-            // Périmètre RESPONSABLE : uniquement ses cabinets gérés
-            if (cabinetsAutorises != null
-                    && (cabinetId == null || !cabinetsAutorises.contains(cabinetId))) {
+            // Le manager ne voit que les consultants explicitement rattachés à son compte.
+            if (viewer != null && viewer.getRole() == ma.cdgcapital.consulttrack.model.Role.RESPONSABLE
+                    && (consultant.getManager() == null || !viewer.getId().equals(consultant.getManager().getId()))) {
                 continue;
             }
+            if (viewer != null && viewer.getRole() == ma.cdgcapital.consulttrack.model.Role.CONSULTANT
+                    && !viewer.getId().equals(consultant.getId())) continue;
 
             FacturationCabinetDTO cabDto = parCabinet.computeIfAbsent(cabinetId, id -> {
                 FacturationCabinetDTO dto = new FacturationCabinetDTO();
@@ -130,15 +134,13 @@ public class FacturationPrefactureService {
         return (nom + " " + prenom).trim();
     }
 
-    /** Nature du BC ; à défaut, déduite du code budgétaire (R… = RUN, P… = PROJET). */
-    private static String natureDe(BonDeCommande bc) {
+    /** Nature RA du BC ; au besoin, résolue depuis le type OPEX/CAPEX du budget associé. */
+    private String natureDe(BonDeCommande bc) {
         if (bc.getNature() != null) return bc.getNature().name();
-        String code = bc.getCodeBudget();
-        if (code != null && !code.isBlank()) {
-            char c = Character.toUpperCase(code.trim().charAt(0));
-            if (c == 'R') return "RUN";
-            if (c == 'P') return "PROJET";
-        }
+        BudgetAnnuel budget = bc.getAnneeBudgetaire() == null || bc.getCodeBudget() == null ? null
+                : budgetRepository.findByAnneeAndCodeBudget(bc.getAnneeBudgetaire(), bc.getCodeBudget()).orElse(null);
+        if (budget != null && "OPEX".equalsIgnoreCase(budget.getTypeBudget())) return "RUN";
+        if (budget != null && "CAPEX".equalsIgnoreCase(budget.getTypeBudget())) return "PROJET";
         return null;
     }
 }

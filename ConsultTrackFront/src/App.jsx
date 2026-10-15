@@ -17,16 +17,18 @@ import api from './api/axiosConfig';
 import logoConsultrack from './assets/logo_consultrack.png';
 
 import {
-    LayoutDashboard, CalendarCheck, LogOut, ShieldCheck, Coffee,
-    Users, FileText, ClipboardCheck, UserCircle, ChevronRight, Receipt
+    LayoutDashboard, CalendarCheck, LogOut, Coffee,
+    Users, FileText, ClipboardCheck, UserCircle, ChevronRight, Receipt,
+    Menu, X, WalletCards, Building2, UserRoundCog, Settings2,
 } from 'lucide-react';
 
-const NavLink = ({ to, children, active, badge }) => {
+const NavLink = ({ to, children, active, badge, onNavigate }) => {
     const activeClass = active
         ? 'bg-[#008858] text-white shadow-lg shadow-[#008858]/20'
         : 'text-blue-100 hover:bg-white/10 hover:text-white';
     return (
-        <Link to={to} className={`flex items-center justify-between gap-3 p-3.5 rounded-xl transition-all font-bold no-underline text-sm mb-1 ${activeClass}`}>
+        <Link to={to} onClick={onNavigate} aria-current={active ? 'page' : undefined}
+              className={`flex items-center justify-between gap-3 rounded-xl p-3 transition-all font-bold no-underline text-sm mb-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${activeClass}`}>
             {children}
             {badge > 0 && (
                 <span className="text-[10px] font-black bg-red-500 text-white rounded-full px-2 py-0.5">{badge}</span>
@@ -35,16 +37,18 @@ const NavLink = ({ to, children, active, badge }) => {
     );
 };
 
+const ROLE_LABELS = { ADMIN: 'Superadmin', RESPONSABLE: 'Manager', CONSULTANT: 'Consultant' };
 const HEADER_TITLES = {
     ADMIN: 'Administration & Pilotage',
-    RESPONSABLE: 'Espace Responsable',
-    CONSULTANT: 'Mon Espace Consultant',
+    RESPONSABLE: 'Espace Manager',
+    CONSULTANT: 'Mon espace Consultant',
 };
 
 const App = () => {
     const { user, logout } = useAuth();
     const location = useLocation();
     const [pending, setPending] = useState(null);
+    const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
     const userRole = user?.role;
 
@@ -70,26 +74,14 @@ const App = () => {
     const currentUserId = user.id;
     const userInitials = ((user.prenom?.[0] || '') + (user.nom?.[0] || '')).toUpperCase() || 'U';
 
-    const sidebarStyle = {
-        width: '18rem', backgroundColor: '#003366', color: 'white',
-        position: 'fixed', height: '100vh', left: 0, top: 0, zIndex: 50,
-        display: 'flex', flexDirection: 'column', padding: '2rem 1.5rem',
-        boxShadow: '4px 0 15px rgba(0,0,0,0.2)', overflowY: 'auto',
-    };
-    const mainStyle = {
-        marginLeft: '18rem', flex: 1, padding: '2rem',
-        backgroundColor: '#f4f7fa', minHeight: '100vh',
-    };
-    const sectionTitleStyle = {
-        fontSize: '11px', color: '#008858', fontWeight: '900', marginLeft: '12px',
-        textTransform: 'uppercase', marginTop: '24px', marginBottom: '8px',
-        letterSpacing: '1.5px', opacity: 0.8,
-    };
+    const sectionTitleStyle = { fontSize: '10px', color: '#9db6cc', fontWeight: '900', marginLeft: '12px', textTransform: 'uppercase', marginTop: '22px', marginBottom: '7px', letterSpacing: '1.2px' };
 
     return (
         <div className="flex min-h-screen">
-            <aside style={sidebarStyle}>
-                <div className="mb-8 px-2 flex flex-col items-center">
+            {mobileNavOpen && <button aria-label="Fermer le menu" onClick={() => setMobileNavOpen(false)} className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" />}
+            <aside id="primary-navigation" className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col overflow-y-auto p-5 pt-12 text-white shadow-2xl transition-transform duration-200 lg:translate-x-0 lg:pt-5 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`} style={{ backgroundColor: '#003366' }}>
+                <button aria-label="Fermer le menu" onClick={() => setMobileNavOpen(false)} className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-lg text-white/75 hover:bg-white/10 lg:hidden"><X size={19} /></button>
+                <div className="mb-6 px-1 flex flex-col items-center">
                     <div className="bg-white p-2 rounded-xl shadow-lg mb-3 w-full flex justify-center">
                         <img src={logoConsultrack} alt="ConsulTrack"
                              style={{ height: '50px', width: 'auto', objectFit: 'contain' }} />
@@ -101,7 +93,8 @@ const App = () => {
                 </div>
 
                 <nav className="flex-1">
-                    <Navigation userRole={userRole} sectionTitleStyle={sectionTitleStyle} pending={pending} />
+                    <Navigation userRole={userRole} sectionTitleStyle={sectionTitleStyle} pending={pending}
+                        onNavigate={() => setMobileNavOpen(false)} />
                 </nav>
 
                 <button onClick={logout}
@@ -110,26 +103,24 @@ const App = () => {
                 </button>
             </aside>
 
-            <main style={mainStyle}>
-                <div className="max-w-7xl mx-auto w-full">
-                    <header className="mb-8 flex justify-between items-center bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                        <h2 style={{ fontSize: '1.15rem', fontWeight: '900', color: '#003366',
-                                     textTransform: 'uppercase', margin: 0 }}>
-                            {HEADER_TITLES[userRole] || 'ConsulTrack'}
-                        </h2>
-                        <div className="flex items-center gap-4 border-l pl-5 border-gray-200">
+            <main className="min-w-0 flex-1 bg-[#f4f7fa] p-4 sm:p-6 lg:ml-72 lg:p-8">
+                <div className="mx-auto w-full max-w-7xl">
+                    <header className="mb-5 flex min-h-[68px] items-center justify-between gap-3 rounded-2xl border border-gray-100 bg-white p-3 shadow-sm sm:mb-7 sm:p-4">
+                        <div className="flex min-w-0 items-center gap-3">
+                            <button aria-label="Ouvrir le menu" aria-expanded={mobileNavOpen} aria-controls="primary-navigation" onClick={() => setMobileNavOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#003366] hover:bg-slate-100 lg:hidden"><Menu size={21} /></button>
+                            <div className="min-w-0"><div className="hidden text-[10px] font-black uppercase tracking-[.16em] text-[#008858] sm:block">ConsulTrack · {ROLE_LABELS[userRole] || 'Espace'}</div>
+                                <h2 className="truncate text-base font-black uppercase text-[#003366] sm:text-lg">{HEADER_TITLES[userRole] || 'ConsulTrack'}</h2></div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2 border-l border-gray-200 pl-3 sm:gap-3 sm:pl-4">
                             <div className="text-right">
-                                <div style={{ fontWeight: '900', color: '#003366', fontSize: '14px' }}>
+                                <div className="max-w-[130px] truncate text-xs font-black text-[#003366] sm:max-w-none sm:text-sm">
                                     {user.prenom} {user.nom}
                                 </div>
-                                <div style={{ fontSize: '10px', color: '#008858', fontWeight: 'bold',
-                                              textTransform: 'uppercase' }}>{userRole}</div>
+                                <div className="text-[9px] font-bold uppercase text-[#008858]">{ROLE_LABELS[userRole] || userRole}</div>
                             </div>
                             <Link to="/profil" title="Mon profil"
-                                  style={{ width: '42px', height: '42px', backgroundColor: '#003366',
-                                           borderRadius: '14px', display: 'flex', alignItems: 'center',
-                                           justifyContent: 'center', color: '#008858', fontWeight: '900',
-                                           fontSize: '14px', border: '2px solid #e5e7eb', textDecoration: 'none' }}>
+                                  className="grid h-10 w-10 place-items-center rounded-[14px] border-2 border-gray-200 bg-[#003366] text-sm font-black text-[#008858] no-underline"
+                                  >
                                 {userInitials}
                             </Link>
                         </div>
@@ -166,36 +157,38 @@ const App = () => {
     );
 };
 
-const Navigation = ({ userRole, sectionTitleStyle, pending }) => {
+const Navigation = ({ userRole, sectionTitleStyle, pending, onNavigate }) => {
     const location = useLocation();
     const is = (p) => location.pathname === p;
+    const tab = new URLSearchParams(location.search).get('tab') || 'cabinets';
+    const adminTab = (key) => location.pathname === '/admin' && tab === key;
+    const dashboardLabel = userRole === 'ADMIN' ? 'Vue d’ensemble' : userRole === 'RESPONSABLE' ? 'Mon équipe' : 'Mon tableau de bord';
 
     return (
         <>
-            <div style={sectionTitleStyle}>Général</div>
-            <NavLink to="/" active={is('/')}>
+            <div style={sectionTitleStyle}>{userRole === 'CONSULTANT' ? 'Mon espace' : 'Pilotage'}</div>
+            <NavLink to="/" active={is('/')} onNavigate={onNavigate}>
                 <div className="flex items-center gap-3">
                     <LayoutDashboard size={18} />
-                    <span>{userRole === 'ADMIN' ? 'Pilotage Global'
-                        : userRole === 'RESPONSABLE' ? 'Dashboard Équipe' : 'Mon Dashboard'}</span>
+                    <span>{dashboardLabel}</span>
                 </div>
             </NavLink>
 
             {userRole === 'CONSULTANT' && (
                 <>
-                    <div style={sectionTitleStyle}>Ma Mission</div>
-                    <NavLink to="/timesheet" active={is('/timesheet')}>
+                    <div style={sectionTitleStyle}>Ma mission</div>
+                    <NavLink to="/timesheet" active={is('/timesheet')} onNavigate={onNavigate}>
                         <div className="flex items-center gap-3">
                             <CalendarCheck size={18} /><span>Ma Présence (RPI)</span>
                         </div>
                         <ChevronRight size={14} className="opacity-50" />
                     </NavLink>
-                    <NavLink to="/absences" active={is('/absences')}>
+                    <NavLink to="/absences" active={is('/absences')} onNavigate={onNavigate}>
                         <div className="flex items-center gap-3">
                             <Coffee size={18} /><span>Mes Congés</span>
                         </div>
                     </NavLink>
-                    <NavLink to="/documents" active={is('/documents')}>
+                    <NavLink to="/documents" active={is('/documents')} onNavigate={onNavigate}>
                         <div className="flex items-center gap-3">
                             <FileText size={18} /><span>Mes Documents</span>
                         </div>
@@ -205,46 +198,55 @@ const Navigation = ({ userRole, sectionTitleStyle, pending }) => {
 
             {(userRole === 'ADMIN' || userRole === 'RESPONSABLE') && (
                 <>
-                    <div style={sectionTitleStyle}>Validation</div>
-                    <NavLink to="/validation" active={is('/validation')} badge={pending?.total}>
+                    <div style={sectionTitleStyle}>Activité</div>
+                    <NavLink to="/validation" active={is('/validation')} badge={pending?.total} onNavigate={onNavigate}>
                         <div className="flex items-center gap-3">
                             <ClipboardCheck size={18} /><span>À Valider</span>
                         </div>
                     </NavLink>
-                    <NavLink to="/facturation" active={is('/facturation')}>
+                    <NavLink to="/facturation" active={is('/facturation')} onNavigate={onNavigate}>
                         <div className="flex items-center gap-3">
                             <Receipt size={18} /><span>Facturation</span>
                         </div>
                     </NavLink>
 
-                    <div style={sectionTitleStyle}>
-                        {userRole === 'ADMIN' ? 'Administration' : 'Référentiel'}
-                    </div>
-                    <NavLink to="/admin" active={is('/admin')}>
-                        <div className="flex items-center gap-3">
-                            <ShieldCheck size={18} />
-                            <span>{userRole === 'ADMIN' ? 'Administration' : 'Cabinets & BC'}</span>
-                        </div>
+                    <NavLink to="/documents" active={is('/documents')} onNavigate={onNavigate}>
+                        <div className="flex items-center gap-3"><FileText size={18} /><span>RPI et rapports</span></div>
                     </NavLink>
 
-                    <div style={sectionTitleStyle}>Documents</div>
-                    <NavLink to="/documents" active={is('/documents')}>
-                        <div className="flex items-center gap-3">
-                            <FileText size={18} /><span>RPI & Rapports</span>
-                        </div>
+                    <div style={sectionTitleStyle}>Administration</div>
+                    <NavLink to="/admin?tab=budgets" active={adminTab('budgets')} onNavigate={onNavigate}>
+                        <div className="flex items-center gap-3"><WalletCards size={18} /><span>Budgets & DA</span></div>
                     </NavLink>
+                    <NavLink to="/admin?tab=users" active={adminTab('users')} onNavigate={onNavigate}>
+                        <div className="flex items-center gap-3"><UserRoundCog size={18} /><span>Consultants & utilisateurs</span></div>
+                    </NavLink>
+                    <NavLink to="/admin?tab=cabinets" active={adminTab('cabinets')} onNavigate={onNavigate}>
+                        <div className="flex items-center gap-3"><Building2 size={18} /><span>Cabinets fournisseurs</span></div>
+                    </NavLink>
+                    <NavLink to="/admin?tab=bcs" active={adminTab('bcs')} onNavigate={onNavigate}>
+                        <div className="flex items-center gap-3"><Receipt size={18} /><span>Bons de commande</span></div>
+                    </NavLink>
+                    {userRole === 'ADMIN' && <>
+                        <NavLink to="/admin?tab=directions" active={adminTab('directions')} onNavigate={onNavigate}>
+                            <div className="flex items-center gap-3"><Users size={18} /><span>Directions</span></div>
+                        </NavLink>
+                        <NavLink to="/admin?tab=feries" active={adminTab('feries')} onNavigate={onNavigate}>
+                            <div className="flex items-center gap-3"><Settings2 size={18} /><span>Jours fériés</span></div>
+                        </NavLink>
+                    </>}
                 </>
             )}
 
             {(userRole === 'ADMIN' || userRole === 'RESPONSABLE') && (
                 <>
-                    <div style={sectionTitleStyle}>Saisie Déléguée</div>
-                    <NavLink to="/admin/timesheet-global" active={is('/admin/timesheet-global')}>
+                    <div style={sectionTitleStyle}>Saisie d’équipe</div>
+                    <NavLink to="/admin/timesheet-global" active={is('/admin/timesheet-global')} onNavigate={onNavigate}>
                         <div className="flex items-center gap-3">
                             <Users size={18} /><span>Timesheet Consultant</span>
                         </div>
                     </NavLink>
-                    <NavLink to="/admin/saisie-absence" active={is('/admin/saisie-absence')}>
+                    <NavLink to="/admin/saisie-absence" active={is('/admin/saisie-absence')} onNavigate={onNavigate}>
                         <div className="flex items-center gap-3">
                             <Coffee size={18} /><span>Saisir une Absence</span>
                         </div>
@@ -253,7 +255,7 @@ const Navigation = ({ userRole, sectionTitleStyle, pending }) => {
             )}
 
             <div style={sectionTitleStyle}>Compte</div>
-            <NavLink to="/profil" active={is('/profil')}>
+            <NavLink to="/profil" active={is('/profil')} onNavigate={onNavigate}>
                 <div className="flex items-center gap-3">
                     <UserCircle size={18} /><span>Mon Profil</span>
                 </div>

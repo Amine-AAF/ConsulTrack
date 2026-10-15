@@ -10,12 +10,14 @@ import ma.cdgcapital.consulttrack.model.AffectationBC;
 import ma.cdgcapital.consulttrack.model.BonDeCommande;
 import ma.cdgcapital.consulttrack.model.Consultant;
 import ma.cdgcapital.consulttrack.model.JourFerie;
+import ma.cdgcapital.consulttrack.model.RPI;
 import ma.cdgcapital.consulttrack.model.StatutPointage;
 import ma.cdgcapital.consulttrack.model.TacheRealisee;
 import ma.cdgcapital.consulttrack.repository.AffectationRepository;
 import ma.cdgcapital.consulttrack.repository.BonDeCommandeRepository;
 import ma.cdgcapital.consulttrack.repository.ConsultantRepository;
 import ma.cdgcapital.consulttrack.repository.JourFerieRepository;
+import ma.cdgcapital.consulttrack.repository.RpiRepository;
 import ma.cdgcapital.consulttrack.repository.TacheRealiseeRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -50,6 +52,7 @@ public class ReportService {
     @Autowired private ConsultantRepository consultantRepository;
     @Autowired private AffectationRepository affectationRepository;
     @Autowired private JourFerieRepository jourFerieRepository;
+    @Autowired private RpiRepository rpiRepository;
 
     // ==========================================================
     // RPI mensuel (consultant × mois, tous BC confondus)
@@ -60,6 +63,15 @@ public class ReportService {
         LocalDate end = ym.atEndOfMonth();
 
         Consultant consultant = consultantRepository.findById(consultantId).orElse(null);
+
+        List<RPI> rpisExternesAnnee = rpiRepository.findByConsultantIdAndAnnee(consultantId, annee);
+        List<RPI> rpisExternesMois = rpisExternesAnnee.stream()
+                .filter(r -> r.getMois() != null && r.getMois() == mois)
+                .toList();
+        if (!rpisExternesMois.isEmpty()) {
+            return construireRpiExterne(consultantId, annee, mois, consultant,
+                    rpisExternesMois, rpisExternesAnnee);
+        }
 
         RpiMensuelDTO rpi = new RpiMensuelDTO();
         rpi.setConsultantId(consultantId);
@@ -161,7 +173,7 @@ public class ReportService {
                 .collect(Collectors.groupingBy(t -> t.getDate().getMonthValue(), TreeMap::new,
                         Collectors.toList()));
 
-        List<RpiDisponibleDTO> resultat = new ArrayList<>();
+        Map<Integer, RpiDisponibleDTO> parMois = new TreeMap<>();
         for (Map.Entry<Integer, List<TacheRealisee>> e : presencesParMois.entrySet()) {
             int m = e.getKey();
             RpiDisponibleDTO dto = new RpiDisponibleDTO();
@@ -174,9 +186,96 @@ public class ReportService {
             dto.setStatutMois(statutAgrege(toutes.stream()
                     .filter(t -> t.getDate().getMonthValue() == m)
                     .toList()));
-            resultat.add(dto);
+            parMois.put(m, dto);
         }
-        return resultat;
+
+        Map<Integer, List<RPI>> rpisExternesParMois = rpiRepository.findByConsultantIdAndAnnee(consultantId, annee)
+                .stream().filter(r -> r.getMois() != null)
+                .collect(Collectors.groupingBy(RPI::getMois, TreeMap::new, Collectors.toList()));
+        for (Map.Entry<Integer, List<RPI>> e : rpisExternesParMois.entrySet()) {
+            int m = e.getKey();
+            List<RPI> lignes = e.getValue();
+            RpiDisponibleDTO dto = new RpiDisponibleDTO();
+            dto.setMois(m);
+            dto.setMoisLabel(moisLabel(YearMonth.of(annee, m)));
+            dto.setTotalJH(lignes.stream().mapToDouble(r -> r.getTotalJH() == null ? 0.0 : r.getTotalJH()).sum());
+            dto.setNbBcs((int) lignes.stream().map(RPI::getBc).filter(java.util.Objects::nonNull)
+                    .map(BonDeCommande::getId).distinct().count());
+            dto.setStatutMois(lignes.stream().allMatch(r -> "VALIDE".equalsIgnoreCase(r.getStatut())) ? "VALIDE" : "MIXTE");
+            parMois.put(m, dto);
+        }
+        return new ArrayList<>(parMois.values());
+    }
+
+    private RpiMensuelDTO construireRpiExterne(Long consultantId, int annee, int mois,
+                                                Consultant consultant, List<RPI> lignesMois,
+                                                List<RPI> lignesAnnee) {
+        YearMonth ym = YearMonth.of(annee, mois);
+        List<BonDeCommande> bcsConsultant = bcRepository.findByConsultant_Id(consultantId);
+        RpiMensuelDTO dto = new RpiMensuelDTO();
+        dto.setConsultantId(consultantId);
+        if (consultant != null) {
+            dto.setConsultantNom(consultant.getNom() + " " + consultant.getPrenom());
+            if (consultant.getCabinet() != null) {
+                dto.setCabinetNom(consultant.getCabinet().getNom());
+                dto.setLogoCabinet(consultant.getCabinet().getLogoImage());
+            }
+        }
+        dto.setMission(resoudreMission(consultantId, bcsConsultant));
+        dto.setMois(mois);
+        dto.setAnnee(annee);
+        dto.setMoisLabel(moisLabel(ym));
+        dto.setPeriodeDu(ym.atDay(1).toString());
+        dto.setPeriodeAu(ym.atEndOfMonth().toString());
+        dto.setSourceExterne(true);
+        dto.setStatutMois(lignesMois.stream().allMatch(r -> "VALIDE".equalsIgnoreCase(r.getStatut())) ? "VALIDE" : "MIXTE");
+        dto.setTotalMtd(lignesMois.stream().mapToDouble(r -> r.getTotalJH() == null ? 0.0 : r.getTotalJH()).sum());
+        dto.setTotalStd(lignesAnnee.stream().filter(r -> r.getMois() != null && r.getMois() <= mois)
+                .mapToDouble(r -> r.getTotalJH() == null ? 0.0 : r.getTotalJH()).sum());
+
+        Map<Long, Double> consommeAvant = lignesAnnee.stream()
+                .filter(r -> r.getBc() != null && r.getMois() != null && r.getMois() < mois)
+                .collect(Collectors.groupingBy(r -> r.getBc().getId(),
+                        Collectors.summingDouble(r -> r.getTotalJH() == null ? 0.0 : r.getTotalJH())));
+        List<RpiBcLigneDTO> bcs = new ArrayList<>();
+        for (RPI ligne : lignesMois) {
+            if (ligne.getBc() == null) continue;
+            BonDeCommande bc = ligne.getBc();
+            double budget = bc.getJoursMax() == null ? 0.0 : bc.getJoursMax();
+            double avant = Math.max(0.0, budget - consommeAvant.getOrDefault(bc.getId(), 0.0));
+            double consomme = ligne.getTotalJH() == null ? 0.0 : ligne.getTotalJH();
+            RpiBcLigneDTO item = new RpiBcLigneDTO();
+            item.setBcId(bc.getId()); item.setReference(bc.getReference()); item.setJhBudget(budget);
+            item.setReliquatAvant(avant); item.setConsommeMois(consomme);
+            item.setJhRestant(Math.max(0.0, avant - consomme));
+            bcs.add(item);
+        }
+        bcs.sort(Comparator.comparing(RpiBcLigneDTO::getReference,
+                Comparator.nullsLast(Comparator.naturalOrder())));
+        dto.setBcs(bcs);
+        dto.setSemaines(List.of());
+        dto.setSignatureConsultant(consultant == null ? null : consultant.getSignatureImage());
+
+        List<RpiHistoriqueLigneDTO> historique = new ArrayList<>();
+        for (BonDeCommande bc : bcsConsultant) {
+            Double[] parMois = new Double[12];
+            for (int i = 0; i < 12; i++) parMois[i] = 0.0;
+            List<RPI> lignesBc = lignesAnnee.stream().filter(r -> r.getBc() != null
+                    && r.getBc().getId().equals(bc.getId())).toList();
+            for (RPI ligne : lignesBc) {
+                if (ligne.getMois() != null && ligne.getMois() >= 1 && ligne.getMois() <= 12)
+                    parMois[ligne.getMois() - 1] += ligne.getTotalJH() == null ? 0.0 : ligne.getTotalJH();
+            }
+            double total = java.util.Arrays.stream(parMois).mapToDouble(Double::doubleValue).sum();
+            RpiHistoriqueLigneDTO h = new RpiHistoriqueLigneDTO();
+            h.setBcId(bc.getId()); h.setReference(bc.getReference()); h.setJoursBdc(bc.getJoursMax());
+            h.setTotalConsomme(total); h.setJoursRestants(Math.max(0.0, (bc.getJoursMax() == null ? 0.0 : bc.getJoursMax()) - total));
+            h.setParMois(java.util.Arrays.asList(parMois));
+            historique.add(h);
+        }
+        dto.setHistoriqueAnnuel(historique);
+        dto.setTotauxAnnuels(totauxHistorique(historique));
+        return dto;
     }
 
     // ==========================================================
