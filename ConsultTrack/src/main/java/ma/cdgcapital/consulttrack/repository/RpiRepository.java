@@ -17,6 +17,7 @@ public interface RpiRepository extends JpaRepository<RPI, Long> {
                                     @Param("annee") int annee);
 
     List<RPI> findByConsultantIdAndAnnee(Long consultantId, int annee);
+    List<RPI> findByAnneeAndMoisAndStatutIgnoreCase(int annee, int mois, String statut);
 
     List<RPI> findByBc_Id(Long bcId);
 }
